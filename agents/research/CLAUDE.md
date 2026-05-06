@@ -20,6 +20,22 @@ Full endpoint reference: `~/Claude/second-brain/resources/SMARTSOCIAL-API-ACCESS
 All BCI agents have FULL EQUAL ACCESS to SmartSocial. You can independently manage the complete lifecycle: generate, schedule, publish, inbox, analytics, strategy, Brand Vault, competitors, RAG. Auth: `X-API-Key: $SMARTSOCIAL_API_KEY` against `https://smartsocial-ai.com/api`
 Training program: `~/Claude/second-brain/resources/SMARTSOCIAL-AGENT-TRAINING-PROGRAM.md`
 
+### SmartSocial Skills (modular, lazy-loaded)
+
+Catalog: `~/Claude/second-brain/resources/smartsocial-skills/README.md`
+
+**Token discipline — DO NOT preload.** Research agent rarely operates SmartSocial directly. Most relevant: feeding research output to themes/articles for the pipeline.
+
+| Trigger | SKU | File (under `smartsocial-skills/`) |
+|---|---|---|
+| **content themes, add article to theme** | **SS-THEMES** | `growth/content-themes/SKILL.md` |
+| competitor analytics, market intel | SS-ANALYTICS | `growth/analytics-reporting/SKILL.md` |
+| RAG, knowledge base, upload doc | SS-RAG | `pro/rag-knowledge-base/SKILL.md` |
+| consultant, trend spotter | SS-AICHAT | `growth/ai-chat-consultation/SKILL.md` |
+| ANY publish/delete (you should not) | SS-SAFETY | `required/autonomy-safety/SKILL.md` |
+
+For content generation, scheduling, inbox, strategy, blog publishing: hand off to Content (drafts) or Ops (publishing) via mission-cli — your job is research, not production.
+
 ## BCI portfolio context (research targets)
 
 Mark's portfolio + active research domains:

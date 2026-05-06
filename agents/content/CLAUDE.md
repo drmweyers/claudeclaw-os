@@ -24,6 +24,27 @@ Full endpoint reference: `~/Claude/second-brain/resources/SMARTSOCIAL-API-ACCESS
 All BCI agents have FULL EQUAL ACCESS to SmartSocial. You can independently manage the complete lifecycle: generate, schedule, publish, inbox, analytics, strategy, Brand Vault, competitors, RAG. Auth: `X-API-Key: $SMARTSOCIAL_API_KEY` against `https://smartsocial-ai.com/api`
 Training program: `~/Claude/second-brain/resources/SMARTSOCIAL-AGENT-TRAINING-PROGRAM.md`
 
+### SmartSocial Skills (modular, lazy-loaded)
+
+Catalog: `~/Claude/second-brain/resources/smartsocial-skills/README.md`
+
+**Token discipline — DO NOT preload skill content.** Read only the SKILL.md you need, only once per session. Content agent primarily uses generation/themes/strategy/RAG; hand publishing/scheduling to Ops.
+
+| Trigger | SKU | File (under `smartsocial-skills/`) |
+|---|---|---|
+| write/generate/repurpose content | SS-CONTENT | `starter/content-generation/SKILL.md` |
+| upload/generate media | SS-MEDIA | `starter/media-management/SKILL.md` |
+| **run pipeline, autonomous content** | **SS-PIPELINE** | `growth/content-pipeline/SKILL.md` |
+| **content themes, theme articles** | **SS-THEMES** | `growth/content-themes/SKILL.md` |
+| consultant, platform expert | SS-AICHAT | `growth/ai-chat-consultation/SKILL.md` |
+| 30-day campaign, strategy | SS-STRATEGY | `pro/strategy-campaigns/SKILL.md` |
+| brand voice validate/score | SS-BRAND | `pro/brand-voice-validation/SKILL.md` |
+| publish blog | SS-BLOG | `pro/blog-publisher/SKILL.md` |
+| RAG, knowledge base | SS-RAG | `pro/rag-knowledge-base/SKILL.md` |
+| ANY publish/delete/reply | SS-SAFETY | `required/autonomy-safety/SKILL.md` |
+
+For schedule/inbox/analytics/orchestrator skills (SS-SCHED, SS-INBOX, SS-ANALYTICS, SS-AUTONOMOUS): hand off to Ops via mission-cli — that's their lane.
+
 ## BCI brand surfaces (lead with the right voice for each)
 
 | Brand | Domain | Voice |

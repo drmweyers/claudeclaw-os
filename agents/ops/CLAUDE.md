@@ -25,6 +25,32 @@ Training program: `~/Claude/second-brain/resources/SMARTSOCIAL-AGENT-TRAINING-PR
 Operations manual: `~/Claude/second-brain/resources/SMARTSOCIAL-OPERATIONS-MANUAL.md`
 Client extraction guide: `~/Claude/second-brain/resources/SMARTSOCIAL-AGENT-EXTRACTION-GUIDE.md`
 
+### SmartSocial Skills (modular, lazy-loaded)
+
+Catalog: `~/Claude/second-brain/resources/smartsocial-skills/README.md` | Pricing: `smartsocial-skills/SKU-CATALOG.md`
+
+**Token discipline — DO NOT preload skill content.** When a SmartSocial task arrives, find the matching SKU below, then `Read` only that ONE `SKILL.md` once per session.
+
+| Trigger | SKU | File (under `~/Claude/second-brain/resources/smartsocial-skills/`) |
+|---|---|---|
+| accounts, brand DNA, competitors, settings | SS-FOUND | `starter/foundation/SKILL.md` |
+| write/generate/repurpose, weekly plan | SS-CONTENT | `starter/content-generation/SKILL.md` |
+| schedule, publish, calendar, recurring | SS-SCHED | `starter/scheduling-publishing/SKILL.md` |
+| upload media, attach image, generate image | SS-MEDIA | `starter/media-management/SKILL.md` |
+| **run pipeline, autonomous content, approval queue** | **SS-PIPELINE** | `growth/content-pipeline/SKILL.md` |
+| **content themes, theme articles, clone theme** | **SS-THEMES** | `growth/content-themes/SKILL.md` |
+| inbox, triage, draft reply, anomaly | SS-INBOX | `growth/inbox-engagement/SKILL.md` |
+| analytics, dashboard, ROI, sentiment, predict | SS-ANALYTICS | `growth/analytics-reporting/SKILL.md` |
+| consultant, platform expert, 26 agents | SS-AICHAT | `growth/ai-chat-consultation/SKILL.md` |
+| 30-day campaign, strategy, roundtable | SS-STRATEGY | `pro/strategy-campaigns/SKILL.md` |
+| brand voice validate/score, brand vault | SS-BRAND | `pro/brand-voice-validation/SKILL.md` |
+| publish blog, deploy blog post | SS-BLOG | `pro/blog-publisher/SKILL.md` |
+| RAG, knowledge base, ground in docs | SS-RAG | `pro/rag-knowledge-base/SKILL.md` |
+| autonomous orchestrator, multi-agent | SS-AUTONOMOUS | `enterprise/autonomous-pipeline/SKILL.md` |
+| ANY publish/delete/reply (check before acting) | SS-SAFETY | `required/autonomy-safety/SKILL.md` |
+
+**SS-PIPELINE + SS-THEMES are the autonomous content engine.** When in doubt about either, read both. Cross-sell is mandatory: pipeline without themes is a no-op.
+
 ## Primary tools (skills — invoked automatically by trigger phrases)
 
 | Skill | Use for |

@@ -72,6 +72,30 @@ Execute. Don't explain what you're about to do — just do it. When Mark asks fo
 | `agent-browser` | browse, scrape, click, fill form |
 | `claude-bowser` | browse with Chrome, observable browser, ui testing |
 
+## SmartSocial Skills (modular, lazy-loaded)
+
+Catalog: `~/Claude/second-brain/resources/smartsocial-skills/README.md` | Pricing: `smartsocial-skills/SKU-CATALOG.md` | Master docs: `SMARTSOCIAL-AGENT-{TRAINING-PROGRAM,OPERATIONS-MANUAL,EXTRACTION-GUIDE}.md`
+
+**Token discipline — DO NOT preload skill content.** When SmartSocial work arrives, find the matching SKU below and `Read` only that ONE `SKILL.md` once per session. For most SmartSocial tasks, delegate to the `ops` agent via mission-cli — they own the workflow.
+
+| Trigger | SKU | File (under `~/Claude/second-brain/resources/smartsocial-skills/`) |
+|---|---|---|
+| accounts, brand DNA, competitors | SS-FOUND | `starter/foundation/SKILL.md` |
+| write/generate/repurpose, weekly plan | SS-CONTENT | `starter/content-generation/SKILL.md` |
+| schedule, publish, calendar, recurring | SS-SCHED | `starter/scheduling-publishing/SKILL.md` |
+| upload media, attach image/video | SS-MEDIA | `starter/media-management/SKILL.md` |
+| **run pipeline, autonomous content** | **SS-PIPELINE** | `growth/content-pipeline/SKILL.md` |
+| **content themes, theme articles** | **SS-THEMES** | `growth/content-themes/SKILL.md` |
+| inbox, triage, draft reply | SS-INBOX | `growth/inbox-engagement/SKILL.md` |
+| analytics, dashboard, predict, sentiment | SS-ANALYTICS | `growth/analytics-reporting/SKILL.md` |
+| consultant, platform expert, 26 agents | SS-AICHAT | `growth/ai-chat-consultation/SKILL.md` |
+| 30-day campaign, strategy, roundtable | SS-STRATEGY | `pro/strategy-campaigns/SKILL.md` |
+| brand voice validate/score | SS-BRAND | `pro/brand-voice-validation/SKILL.md` |
+| publish blog | SS-BLOG | `pro/blog-publisher/SKILL.md` |
+| RAG, knowledge base | SS-RAG | `pro/rag-knowledge-base/SKILL.md` |
+| autonomous orchestrator | SS-AUTONOMOUS | `enterprise/autonomous-pipeline/SKILL.md` |
+| ANY publish/delete/reply (always check) | SS-SAFETY | `required/autonomy-safety/SKILL.md` |
+
 ## Email — outbound via Google Workspace CLI
 
 When Mark asks to send email, use the `google-workspace` skill (the `gws` CLI). Mark is super admin on `bcinnovationlabs.com`; gws is authenticated as `dr.m.weyers@bcinnovationlabs.com`. The alias `claudeclaw@bcinnovationlabs.com` (display name "ClaudeClaw") is verified as a send-as on the same account.
