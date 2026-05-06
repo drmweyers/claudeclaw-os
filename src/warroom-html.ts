@@ -505,6 +505,24 @@ export function getWarRoomHtml(token: string, chatId: string, warroomPort: numbe
   .btn.end { background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2); color: #ef4444; }
   .btn.end:hover { background: rgba(239,68,68,0.15); }
 
+  /* Failure banner shown when Start Meeting can't reach a working
+     backend (WARROOM_ENABLED unset, Python server not ready, fetch
+     threw, etc.). The legacy code only added a single transcript line
+     for these cases, which the user perceived as "nothing happens"
+     because the button itself only flickered for ~200ms. */
+  .meeting-error {
+    flex: 1;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.25);
+    color: #fca5a5;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .meeting-error[hidden] { display: none; }
+
   .mic-btn {
     width: 52px;
     height: 52px;
@@ -779,6 +797,7 @@ export function getWarRoomHtml(token: string, chatId: string, warroomPort: numbe
 
       <div class="controls">
         <button class="btn start" id="meetingBtn" onclick="toggleMeeting()">Start Meeting</button>
+        <div class="meeting-error" id="meetingError" role="alert" aria-live="polite" hidden></div>
         <button class="mic-btn" id="micBtn" onclick="toggleMic()" disabled>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -1709,8 +1728,22 @@ window.addEventListener('pagehide', __warRoomCleanup);
 window.addEventListener('beforeunload', __warRoomCleanup);
 
 // ── Meeting controls ──
+function showMeetingError(text) {
+  var el = document.getElementById('meetingError');
+  if (!el) return;
+  el.textContent = text || 'Could not start the meeting.';
+  el.hidden = false;
+}
+function hideMeetingError() {
+  var el = document.getElementById('meetingError');
+  if (el) el.hidden = true;
+}
+
 async function toggleMeeting() {
   var btn = document.getElementById('meetingBtn');
+  // Clear any prior failure banner so a retry click doesn't leave a
+  // stale error visible while we're trying again.
+  hideMeetingError();
   if (!meetingActive) {
     var agentLabel = pinnedAgent ? (AGENT_LABELS[pinnedAgent] || pinnedAgent) : 'Main';
     btn.textContent = 'Setting up ' + agentLabel + '...';
@@ -1728,10 +1761,15 @@ async function toggleMeeting() {
       var data = await resp.json();
 
       if (data.error) {
+        // Surface the failure prominently so the user actually notices.
+        // The transcript entry is kept for history, but the banner is
+        // what makes the click feel responsive instead of silent.
+        showMeetingError(data.error);
         addTranscriptEntry('system', data.error);
         btn.textContent = 'Start Meeting';
         btn.className = 'btn start';
         btn.disabled = false;
+        document.getElementById('statusText').textContent = 'ready';
         return;
       }
 
@@ -1956,6 +1994,7 @@ async function toggleMeeting() {
         connectTimeoutHandle = null;
         if (retryTimerHandle) { clearTimeout(retryTimerHandle); retryTimerHandle = null; }
         if (!meetingActive && pipecatClient) {
+          showMeetingError('Connection timed out. Check the server logs.');
           addTranscriptEntry('system', 'Connection timed out. Check the server logs.');
           btn.textContent = 'Start Meeting';
           btn.className = 'btn start';
@@ -1981,11 +2020,14 @@ async function toggleMeeting() {
     } catch (err) {
       console.error('[WarRoom] Connection failed:', err);
       clearConnectTimeout();
-      addTranscriptEntry('system', 'Connection failed: ' + formatErr(err));
+      var errText = 'Connection failed: ' + formatErr(err);
+      showMeetingError(errText);
+      addTranscriptEntry('system', errText);
       stopWaveform();
       btn.textContent = 'Start Meeting';
       btn.className = 'btn start';
       btn.disabled = false;
+      document.getElementById('statusText').textContent = 'ready';
     }
   } else {
     // End meeting
