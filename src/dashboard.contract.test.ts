@@ -400,9 +400,16 @@ describe('GET /api/security/status', () => {
 });
 
 describe('GET /api/chat/history', () => {
-  it('rejects missing chatId with 400', async () => {
+  // Originally this route 400'd when chatId was missing and the SPA
+  // surfaced the error to the user. The handler now falls back to
+  // ALLOWED_CHAT_ID and otherwise returns an empty list, so a missing
+  // chatId is a quiet 200 — pinning that here so the route doesn't
+  // accidentally regress to the noisy 400.
+  it('returns { turns: [] } when chatId is missing (no 400)', async () => {
     const res = await get('/api/chat/history');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body).toMatchObject({ turns: expect.any(Array) });
   });
 
   it('returns { turns: [] } with chatId', async () => {

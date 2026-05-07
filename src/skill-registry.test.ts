@@ -28,12 +28,14 @@ function writeSkill(baseDir: string, skillName: string, content: string): void {
 
 let tempRoot: string;
 let tempGlobal: string;
-let origHome: string;
+let origHome: string | undefined;
+let origUserProfile: string | undefined;
 
 beforeEach(() => {
   tempRoot = createTempSkillDir();
   tempGlobal = createTempSkillDir();
-  origHome = process.env.HOME || os.homedir();
+  origHome = process.env.HOME;
+  origUserProfile = process.env.USERPROFILE;
 
   // Create structure: tempRoot is a fake project root with CLAUDE.md
   fs.writeFileSync(path.join(tempRoot, 'CLAUDE.md'), '# test');
@@ -43,12 +45,19 @@ beforeEach(() => {
   const globalSkillsDir = path.join(tempGlobal, '.claude', 'skills');
   fs.mkdirSync(globalSkillsDir, { recursive: true });
 
-  // Override HOME so global skills scan finds our temp dir
+  // Override the home dir so the global skills scan lands in our temp.
+  // os.homedir() reads HOME on POSIX and USERPROFILE on Windows — set
+  // both so the test works on either platform. Without USERPROFILE the
+  // Windows test was scanning the real ~/.claude/skills/ and pulling in
+  // dozens of unrelated skills, which broke every assertion that expected
+  // a clean tempGlobal-only registry.
   process.env.HOME = tempGlobal;
+  process.env.USERPROFILE = tempGlobal;
 });
 
 afterEach(() => {
-  process.env.HOME = origHome;
+  if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
+  if (origUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = origUserProfile;
   fs.rmSync(tempRoot, { recursive: true, force: true });
   fs.rmSync(tempGlobal, { recursive: true, force: true });
 });
