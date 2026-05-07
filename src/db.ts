@@ -226,6 +226,7 @@ function createSchema(database: Database.Database): void {
       error           TEXT,
       created_by      TEXT NOT NULL DEFAULT 'dashboard',
       priority        INTEGER NOT NULL DEFAULT 0,
+      category        TEXT,
       created_at      INTEGER NOT NULL,
       started_at      INTEGER,
       completed_at    INTEGER
@@ -671,6 +672,12 @@ function runMigrations(database: Database.Database): void {
 
   // Mission Control: migrate assigned_agent from NOT NULL to nullable (allow unassigned tasks)
   const missionCols = database.prepare(`PRAGMA table_info(mission_tasks)`).all() as Array<{ name: string; notnull: number }>;
+  // Mission Control: add nullable `category` column for the Ops/Marketing/
+  // Implementation cut. Old rows stay NULL, new rows can opt in.
+  if (missionCols.length > 0 && !missionCols.some((c) => c.name === 'category')) {
+    database.exec(`ALTER TABLE mission_tasks ADD COLUMN category TEXT`);
+    logger.info('Migration: added category column to mission_tasks');
+  }
   const assignedCol = missionCols.find((c) => c.name === 'assigned_agent');
   if (assignedCol && assignedCol.notnull === 1) {
     database.exec(`
@@ -2146,6 +2153,12 @@ export function getInterAgentTasks(
 
 // ── Mission Tasks (one-shot async tasks for Mission Control) ─────────
 
+export type MissionCategory = 'ops' | 'marketing' | 'impl';
+export const MISSION_CATEGORIES: readonly MissionCategory[] = ['ops', 'marketing', 'impl'] as const;
+export function isMissionCategory(v: unknown): v is MissionCategory {
+  return typeof v === 'string' && (MISSION_CATEGORIES as readonly string[]).includes(v);
+}
+
 export interface MissionTask {
   id: string;
   title: string;
@@ -2155,6 +2168,7 @@ export interface MissionTask {
   result: string | null;
   error: string | null;
   created_by: string;
+  category: MissionCategory | null;
   priority: number;
   created_at: number;
   started_at: number | null;
@@ -2168,12 +2182,27 @@ export function createMissionTask(
   assignedAgent: string | null = null,
   createdBy = 'dashboard',
   priority = 0,
+  category: MissionCategory | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
+  // Belt-and-braces: silently null any garbage that slips past callers.
+  // The API layer is the actual validation gate; this prevents bad
+  // values landing in the DB if a future caller skips that gate.
+  const safeCategory: MissionCategory | null = isMissionCategory(category) ? category : null;
   db.prepare(
-    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, created_at)
-     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)`,
-  ).run(id, title, prompt, assignedAgent, createdBy, priority, now);
+    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, category, created_at)
+     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+  ).run(id, title, prompt, assignedAgent, createdBy, priority, safeCategory, now);
+}
+
+// Set or clear a task's category. Returns false on unknown values
+// (without throwing) so callers can treat invalid input as a no-op.
+export function setMissionTaskCategory(id: string, category: MissionCategory | null): boolean {
+  if (category !== null && !isMissionCategory(category)) return false;
+  const result = db.prepare(
+    `UPDATE mission_tasks SET category = ? WHERE id = ?`,
+  ).run(category, id);
+  return result.changes > 0;
 }
 
 export function getUnassignedMissionTasks(): MissionTask[] {
@@ -2185,7 +2214,11 @@ export function getUnassignedMissionTasks(): MissionTask[] {
     .all() as MissionTask[];
 }
 
-export function getMissionTasks(agentId?: string, status?: string): MissionTask[] {
+export function getMissionTasks(
+  agentId?: string,
+  status?: string,
+  category?: MissionCategory,
+): MissionTask[] {
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -2196,6 +2229,10 @@ export function getMissionTasks(agentId?: string, status?: string): MissionTask[
   if (status) {
     conditions.push('status = ?');
     params.push(status);
+  }
+  if (category && isMissionCategory(category)) {
+    conditions.push('category = ?');
+    params.push(category);
   }
 
   const where = conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '';

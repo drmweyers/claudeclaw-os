@@ -19,6 +19,8 @@ import {
   setMissionColumnWidthsBulk,
 } from '@/lib/personalization';
 
+type MissionCategory = 'ops' | 'marketing' | 'impl';
+
 interface MissionTask {
   id: string;
   title: string;
@@ -27,6 +29,7 @@ interface MissionTask {
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   priority: number;
   created_by: string;
+  category: MissionCategory | null;
   created_at: number;
   started_at: number | null;
   completed_at: number | null;
@@ -39,6 +42,16 @@ interface Agent { id: string; name: string; description: string; running: boolea
 const TERMINAL: MissionTask['status'][] = ['completed', 'failed', 'cancelled'];
 const DONE_VISIBLE_SECS = 30 * 60;
 
+// Display + accent for the three category chips. Kept tight so a future
+// fourth category is a one-line add. The dot color is pulled into the
+// badge component below.
+const CATEGORY_META: Record<MissionCategory, { label: string; dot: string; tint: string }> = {
+  ops:       { label: 'Ops',       dot: '#60a5fa', tint: 'rgba(96,165,250,0.12)' },
+  marketing: { label: 'Marketing', dot: '#f472b6', tint: 'rgba(244,114,182,0.12)' },
+  impl:      { label: 'Impl',      dot: '#22c55e', tint: 'rgba(34,197,94,0.12)' },
+};
+const CATEGORY_IDS: MissionCategory[] = ['ops', 'marketing', 'impl'];
+
 export function MissionControl() {
   const [location, navigate] = useLocation();
   const tasks = useFetch<{ tasks: MissionTask[] }>('/api/mission/tasks', 15_000);
@@ -47,6 +60,9 @@ export function MissionControl() {
   const [createOpen, setCreateOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [bulkAssigning, setBulkAssigning] = useState(false);
+  // Active category filter chip. null = show all. Local state only —
+  // intentionally not persisted, so a refresh always lands on "all".
+  const [categoryFilter, setCategoryFilter] = useState<MissionCategory | null>(null);
 
   // ?new=1 from the command palette opens the create modal.
   useEffect(() => {
@@ -58,6 +74,17 @@ export function MissionControl() {
     }
   }, [location]);
 
+  // Per-category counts are computed off the unfiltered task list so the
+  // chip numbers don't mutate when a chip is selected.
+  const categoryCounts = useMemo(() => {
+    const counts: Record<MissionCategory | 'all', number> = { all: 0, ops: 0, marketing: 0, impl: 0 };
+    for (const t of tasks.data?.tasks ?? []) {
+      counts.all += 1;
+      if (t.category) counts[t.category] += 1;
+    }
+    return counts;
+  }, [tasks.data]);
+
   const { byAgent, inbox, totalActive } = useMemo(() => {
     const all = tasks.data?.tasks ?? [];
     const agentList = agents.data?.agents ?? [];
@@ -66,6 +93,12 @@ export function MissionControl() {
       if (!TERMINAL.includes(t.status)) return true;
       if (!t.completed_at) return true;
       return now - t.completed_at < DONE_VISIBLE_SECS;
+    }).filter((t) => {
+      // Category filter is applied AFTER the recency filter so the
+      // chip counts include recently-completed work, but a selected
+      // chip still hides everything that doesn't match.
+      if (categoryFilter === null) return true;
+      return t.category === categoryFilter;
     });
     const inbox = visible.filter((t) => !t.assigned_agent);
     const byAgent: Record<string, MissionTask[]> = {};
@@ -75,7 +108,7 @@ export function MissionControl() {
       (byAgent[t.assigned_agent] ??= []).push(t);
     }
     return { byAgent, inbox, totalActive: visible.filter((t) => !TERMINAL.includes(t.status)).length };
-  }, [tasks.data, agents.data]);
+  }, [tasks.data, agents.data, categoryFilter]);
 
   async function autoAssignAll() {
     setBulkAssigning(true);
@@ -167,20 +200,23 @@ export function MissionControl() {
       {loading && <PageState loading />}
 
       {!loading && !error && (
-        <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
-          <div class="flex gap-3 p-4 h-full min-w-max">
-            <InboxColumn tasks={inbox} onChange={tasks.refresh} agents={orderedAgents} />
-            {orderedAgents.map((a) => (
-              <AgentColumn
-                key={a.id}
-                agent={a}
-                tasks={byAgent[a.id] ?? []}
-                onChange={tasks.refresh}
-                onColumnDrop={handleColumnDrop}
-              />
-            ))}
+        <>
+          <CategoryFilterRow active={categoryFilter} onChange={setCategoryFilter} counts={categoryCounts} />
+          <div class="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+            <div class="flex gap-3 p-4 h-full min-w-max">
+              <InboxColumn tasks={inbox} onChange={tasks.refresh} agents={orderedAgents} />
+              {orderedAgents.map((a) => (
+                <AgentColumn
+                  key={a.id}
+                  agent={a}
+                  tasks={byAgent[a.id] ?? []}
+                  onChange={tasks.refresh}
+                  onColumnDrop={handleColumnDrop}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       <CreateTaskModal
@@ -196,6 +232,63 @@ export function MissionControl() {
         {historyOpen && <HistoryList />}
       </Drawer>
     </div>
+  );
+}
+
+// ── Category filter chips + badge ───────────────────────────────────
+
+// Horizontal chip row above the kanban. Lets you slice tasks by
+// Operations / Marketing / Implementation. "All" clears the filter.
+function CategoryFilterRow({
+  active, onChange, counts,
+}: {
+  active: MissionCategory | null;
+  onChange: (next: MissionCategory | null) => void;
+  counts: Record<MissionCategory | 'all', number>;
+}) {
+  const Chip = ({ id, label, count }: { id: MissionCategory | null; label: string; count: number }) => {
+    const isActive = active === id;
+    const meta = id ? CATEGORY_META[id] : null;
+    return (
+      <button
+        type="button"
+        onClick={() => onChange(id)}
+        class={[
+          'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] border transition-colors',
+          isActive
+            ? 'border-[var(--color-accent)] text-[var(--color-text)] bg-[var(--color-accent-soft)]'
+            : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-border-strong)]',
+        ].join(' ')}
+      >
+        {meta && <span class="w-1.5 h-1.5 rounded-full" style={{ background: meta.dot }} />}
+        <span>{label}</span>
+        <span class="text-[var(--color-text-faint)] tabular-nums">{count}</span>
+      </button>
+    );
+  };
+  return (
+    <div class="px-4 pt-3 pb-1 flex items-center gap-1.5 flex-wrap">
+      <Chip id={null} label="All" count={counts.all} />
+      {CATEGORY_IDS.map((id) => (
+        <Chip key={id} id={id} label={CATEGORY_META[id].label} count={counts[id]} />
+      ))}
+    </div>
+  );
+}
+
+// Compact pill shown on a task card to surface its category at a glance.
+function CategoryBadge({ category }: { category: MissionCategory | null }) {
+  if (!category) return null;
+  const meta = CATEGORY_META[category];
+  return (
+    <span
+      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium"
+      style={{ background: meta.tint, color: meta.dot }}
+      title={`Category: ${meta.label}`}
+    >
+      <span class="w-1 h-1 rounded-full" style={{ background: meta.dot }} />
+      {meta.label}
+    </span>
   );
 }
 
@@ -627,6 +720,7 @@ function InboxCard({
       >
         <div class="flex items-center gap-1.5 mb-1">
           <Pill tone="neutral">unassigned</Pill>
+          <CategoryBadge category={task.category} />
           <span class="ml-auto text-[10px] text-[var(--color-text-faint)] tabular-nums">
             {formatRelativeTime(task.created_at)}
           </span>
@@ -830,6 +924,7 @@ function TaskCard({ task, onChange }: { task: MissionTask; onChange: () => void 
       <div class="flex items-center gap-1.5 flex-wrap">
         {task.priority > 0 && <Pill tone={priorityTone}>P{task.priority}</Pill>}
         <Pill tone={task.status as any}>{task.status}</Pill>
+        <CategoryBadge category={task.category} />
         <div class="ml-auto flex items-center gap-1">
           {(task.status === 'queued' || task.status === 'running') && (
             <button
@@ -886,11 +981,16 @@ function CreateTaskModal({
   const [agent, setAgent] = useState<string>('');
   const [priority, setPriority] = useState(5);
   const [autoAssign, setAutoAssign] = useState(true);
+  // '' means "let the auto-classifier decide" when autoAssign is on, or
+  // "no category" when the user is assigning manually. Explicit picks
+  // ('ops' | 'marketing' | 'impl') always win.
+  const [category, setCategory] = useState<MissionCategory | ''>('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   function close() {
-    setTitle(''); setPrompt(''); setAgent(''); setPriority(5); setAutoAssign(true); setErr(null);
+    setTitle(''); setPrompt(''); setAgent(''); setPriority(5); setAutoAssign(true);
+    setCategory(''); setErr(null);
     onClose();
   }
 
@@ -899,6 +999,7 @@ function CreateTaskModal({
     try {
       const body: any = { title: title.trim(), prompt: prompt.trim(), priority };
       if (!autoAssign && agent) body.assigned_agent = agent;
+      if (category) body.category = category;
       const created = await apiPost<{ task: MissionTask }>('/api/mission/tasks', body);
       if (autoAssign && !agent) {
         // Fire auto-assign in background; don't block the modal close.
@@ -983,6 +1084,19 @@ function CreateTaskModal({
               class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] tabular-nums outline-none focus:border-[var(--color-accent)]"
             />
           </div>
+        </div>
+        <div>
+          <label class="block text-[10px] uppercase tracking-wider text-[var(--color-text-faint)] mb-1">Category</label>
+          <select
+            value={category}
+            onChange={(e) => setCategory((e.target as HTMLSelectElement).value as MissionCategory | '')}
+            class="w-full bg-[var(--color-elevated)] border border-[var(--color-border)] rounded px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
+          >
+            <option value="">{autoAssign ? 'Auto (classifier picks)' : 'None'}</option>
+            {CATEGORY_IDS.map((id) => (
+              <option key={id} value={id}>{CATEGORY_META[id].label}</option>
+            ))}
+          </select>
         </div>
         {err && <div class="text-[var(--color-status-failed)] text-[11px]">{err}</div>}
       </div>

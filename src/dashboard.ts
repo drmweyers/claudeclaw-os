@@ -38,6 +38,9 @@ import {
   assignMissionTask,
   getUnassignedMissionTasks,
   getMissionTaskHistory,
+  setMissionTaskCategory,
+  isMissionCategory,
+  type MissionCategory,
   getAuditLog,
   getAuditLogCount,
   getRecentBlockedActions,
@@ -113,7 +116,7 @@ import { logger } from './logger.js';
 import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
 import { killProcess, isProcessAlive, findProcessesByPattern } from './platform.js';
 
-async function classifyTaskAgent(prompt: string): Promise<string | null> {
+async function classifyTask(prompt: string): Promise<{ agent: string; category: MissionCategory | null }> {
   const agentIds = listAgentIds();
   const validAgents = ['main', ...agentIds];
   const agentDescriptions = agentIds.map((id) => {
@@ -127,32 +130,47 @@ async function classifyTaskAgent(prompt: string): Promise<string | null> {
 - main: Primary assistant, general tasks, anything that doesn't clearly fit another agent
 ${agentDescriptions.join('\n')}
 
-Which ONE agent is best suited for this task?
+For the task below, return:
+1. The single best agent.
+2. A category from this set:
+   - "ops"        — running the business, system maintenance, billing, calendar, inbox, account chores
+   - "marketing"  — content creation, social posts, blog drafts, copy, SEO, audience growth
+   - "impl"       — building or shipping product features, code changes, integrations, technical research
+   - null         — none of the above is a clear fit
+
 Task: "${prompt.slice(0, 500)}"
 
-Reply with JSON: {"agent": "agent_id"}`;
+Reply with JSON: {"agent": "agent_id", "category": "ops" | "marketing" | "impl" | null}`;
+
+  function normalize(parsed: { agent?: string; category?: unknown } | null): { agent: string; category: MissionCategory | null } | null {
+    if (!parsed?.agent || !validAgents.includes(parsed.agent)) return null;
+    const category = isMissionCategory(parsed.category) ? parsed.category : null;
+    return { agent: parsed.agent, category };
+  }
 
   // Primary path: Claude Haiku via OAuth — same auth the agents use, no
   // free-tier quota wall. Gemini classification used to 429 here and
   // surface a 500 to the dashboard, blocking the auto-assign UI.
   try {
     const raw = await extractViaClaude(classificationPrompt);
-    const parsed = parseJsonResponse<{ agent: string }>(raw);
-    if (parsed?.agent && validAgents.includes(parsed.agent)) return parsed.agent;
+    const parsed = parseJsonResponse<{ agent: string; category?: unknown }>(raw);
+    const result = normalize(parsed);
+    if (result) return result;
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : err }, 'Haiku classify failed, falling back to Gemini');
   }
 
   // Fallback: Gemini. Wrapped so a 429 doesn't bubble up — we'd rather
-  // assign to 'main' than fail the request.
+  // assign to 'main' (no category) than fail the request.
   try {
     const response = await generateContent(classificationPrompt);
-    const parsed = parseJsonResponse<{ agent: string }>(response);
-    if (parsed?.agent && validAgents.includes(parsed.agent)) return parsed.agent;
+    const parsed = parseJsonResponse<{ agent: string; category?: unknown }>(response);
+    const result = normalize(parsed);
+    if (result) return result;
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : err }, 'Gemini classify failed, defaulting to main');
   }
-  return 'main';
+  return { agent: 'main', category: null };
 }
 
 // Meeting id format: wr_<timestampBase36>_<6-hex-random>. Regex also allows
@@ -1521,7 +1539,9 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/api/mission/tasks', (c) => {
     const agentId = c.req.query('agent') || undefined;
     const status = c.req.query('status') || undefined;
-    const tasks = getMissionTasks(agentId, status);
+    const categoryRaw = c.req.query('category');
+    const category = isMissionCategory(categoryRaw) ? categoryRaw : undefined;
+    const tasks = getMissionTasks(agentId, status, category);
     return c.json({ tasks });
   });
 
@@ -1538,6 +1558,7 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       prompt?: string;
       assigned_agent?: string;
       priority?: number;
+      category?: string | null;
     }>();
 
     const title = body?.title?.trim();
@@ -1556,8 +1577,18 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       }
     }
 
+    // Validate category if provided. null and undefined both mean
+    // "no category"; only an explicit unknown string is rejected.
+    let category: MissionCategory | null = null;
+    if (body?.category != null) {
+      if (!isMissionCategory(body.category)) {
+        return c.json({ error: `Unknown category: ${body.category}. Valid: ops, marketing, impl` }, 400);
+      }
+      category = body.category;
+    }
+
     const id = crypto.randomBytes(4).toString('hex');
-    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority);
+    createMissionTask(id, title, prompt, assignedAgent, 'dashboard', priority, category);
 
     const task = getMissionTask(id);
     return c.json({ task }, 201);
@@ -1576,13 +1607,16 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     if (tasks.length === 0) return c.json({ assigned: 0, results: [] });
 
     const CONCURRENCY = 5;
-    const results: Array<{ id: string; agent: string }> = [];
+    const results: Array<{ id: string; agent: string; category: MissionCategory | null }> = [];
     for (let i = 0; i < tasks.length; i += CONCURRENCY) {
       const batch = tasks.slice(i, i + CONCURRENCY);
       const settled = await Promise.all(batch.map(async (task) => {
-        const agent = await classifyTaskAgent(task.prompt);
+        const { agent, category } = await classifyTask(task.prompt);
+        // Only set category if the LLM produced one AND the task does
+        // not already have one — explicit user choices win.
+        if (category && task.category == null) setMissionTaskCategory(task.id, category);
         if (agent && assignMissionTask(task.id, agent)) {
-          return { id: task.id, agent };
+          return { id: task.id, agent, category: category ?? task.category };
         }
         return null;
       }));
@@ -1591,29 +1625,50 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     return c.json({ assigned: results.length, results });
   });
 
-  // Auto-assign a single task via Gemini classification
+  // Auto-assign a single task via classifier (also fills category).
   app.post('/api/mission/tasks/:id/auto-assign', async (c) => {
     const id = c.req.param('id');
     const task = getMissionTask(id);
     if (!task) return c.json({ error: 'Not found' }, 404);
     if (task.assigned_agent) return c.json({ error: 'Already assigned' }, 400);
 
-    const agent = await classifyTaskAgent(task.prompt);
+    const { agent, category } = await classifyTask(task.prompt);
     if (!agent) return c.json({ error: 'Classification failed' }, 500);
 
     assignMissionTask(id, agent);
-    return c.json({ ok: true, assigned_agent: agent });
+    if (category && task.category == null) setMissionTaskCategory(id, category);
+    return c.json({ ok: true, assigned_agent: agent, category: category ?? task.category });
   });
 
   app.patch('/api/mission/tasks/:id', async (c) => {
     const id = c.req.param('id');
-    const body = await c.req.json<{ assigned_agent?: string }>();
-    const newAgent = body?.assigned_agent?.trim();
-    if (!newAgent) return c.json({ error: 'assigned_agent required' }, 400);
-    const validAgents = ['main', ...listAgentIds()];
-    if (!validAgents.includes(newAgent)) return c.json({ error: 'Unknown agent' }, 400);
-    const ok = reassignMissionTask(id, newAgent);
-    return c.json({ ok });
+    const body = await c.req.json<{ assigned_agent?: string; category?: string | null }>();
+
+    // Either field can be patched independently. At least one must be
+    // present, otherwise the request is a noop.
+    const hasAgent = body?.assigned_agent !== undefined;
+    const hasCategory = body?.category !== undefined;
+    if (!hasAgent && !hasCategory) {
+      return c.json({ error: 'assigned_agent or category required' }, 400);
+    }
+
+    if (hasAgent) {
+      const newAgent = body!.assigned_agent!.trim();
+      if (!newAgent) return c.json({ error: 'assigned_agent required' }, 400);
+      const validAgents = ['main', ...listAgentIds()];
+      if (!validAgents.includes(newAgent)) return c.json({ error: 'Unknown agent' }, 400);
+      reassignMissionTask(id, newAgent);
+    }
+
+    if (hasCategory) {
+      const cat = body!.category;
+      if (cat !== null && !isMissionCategory(cat)) {
+        return c.json({ error: `Unknown category: ${cat}. Valid: ops, marketing, impl, or null` }, 400);
+      }
+      setMissionTaskCategory(id, cat as MissionCategory | null);
+    }
+
+    return c.json({ ok: true });
   });
 
   app.delete('/api/mission/tasks/:id', (c) => {
