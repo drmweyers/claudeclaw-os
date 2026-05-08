@@ -1982,7 +1982,14 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
 
   // List all configured agents with status
   app.get('/api/agents', (c) => {
-    const agentIds = listAgentIds();
+    // Filter out 'main' here — it's prepended separately below with
+    // its own pid-file path (claudeclaw.pid) and curated metadata.
+    // Without the filter, main shows up twice in the dashboard: once
+    // from the curated prepend, once from the agents/main/ directory
+    // entry (which 404'd or fell into the catch block, surfacing a
+    // bogus offline duplicate). Same convention used in
+    // /api/warroom/agents at the top of this file.
+    const agentIds = listAgentIds().filter((id) => id !== 'main');
     const agents = agentIds.map((id) => {
       try {
         const config = loadAgentConfig(id);
