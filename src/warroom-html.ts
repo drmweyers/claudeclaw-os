@@ -1097,6 +1097,17 @@ async function reloadMeetingAfterRespawn(statusLabel, targetAgent) {
           addTranscriptEntry('system', statusLabel + ' is ready. Speak now.');
           startWaveform();
           clearSwitchingFailsafe();
+          // Explicit enableMic — pipecat client-js 1.7.0 does not start
+          // mic capture from the constructor flag alone. See the matching
+          // call in toggleMeeting > activateMeeting for the full reason.
+          try {
+            if (pipecatClient && typeof pipecatClient.enableMic === 'function') {
+              var pp = pipecatClient.enableMic(true);
+              if (pp && typeof pp.then === 'function') {
+                pp.catch(function (err) { console.error('[WarRoom] pin-switch enableMic failed:', err); });
+              }
+            }
+          } catch (err) { console.error('[WarRoom] pin-switch enableMic threw:', err); }
         },
         onDisconnected: function() {
           if (currentTransport) { try { forceCloseTransport(currentTransport); } catch(e){} currentTransport = null; }
@@ -1480,6 +1491,17 @@ async function togglePin(agentId) {
           addTranscriptEntry('system', statusLabel + ' is ready. Speak now.');
           startWaveform();
           clearSwitchingFailsafe();
+          // Explicit enableMic on agent-switch reconnect — see the
+          // matching call in activateMeeting for why constructor
+          // enableMic:true alone is not enough in client-js 1.7.0.
+          try {
+            if (pipecatClient && typeof pipecatClient.enableMic === 'function') {
+              var pp = pipecatClient.enableMic(true);
+              if (pp && typeof pp.then === 'function') {
+                pp.catch(function (err) { console.error('[WarRoom] switch enableMic failed:', err); });
+              }
+            }
+          } catch (err) { console.error('[WarRoom] switch enableMic threw:', err); }
         },
         onDisconnected: function() {
           console.log('[WarRoom] Disconnected after switch');
@@ -1820,6 +1842,23 @@ async function toggleMeeting() {
         addTranscriptEntry('system', 'Meeting started. Speak now.');
         // Kick off the live mic waveform for visual feedback
         startWaveform();
+        // Pipecat client-js 1.7.0 with WebSocketTransport does NOT
+        // auto-start audio capture even when enableMic:true is passed
+        // to the constructor — the flag only sets the default state,
+        // it doesn't actually call MediaRecorder.start(). Without this
+        // explicit call the WS handshakes successfully but no audio
+        // frames ever flow, Gemini never hears the user, and the
+        // pipeline goes mute. Symptom: meeting "looks" active, transcript
+        // table stays empty, no BotTranscriptionFrames in pipecat logs.
+        try {
+          if (pipecatClient && typeof pipecatClient.enableMic === 'function') {
+            var p = pipecatClient.enableMic(true);
+            if (p && typeof p.then === 'function') {
+              p.then(function () { console.log('[WarRoom] mic capture started'); })
+               .catch(function (err) { console.error('[WarRoom] enableMic failed:', err); });
+            }
+          }
+        } catch (err) { console.error('[WarRoom] enableMic threw:', err); }
       }
 
       // Build a fresh PipecatClient WITH a fresh WebSocketTransport each
@@ -1873,6 +1912,19 @@ async function toggleMeeting() {
                         document.getElementById('micBtn').classList.add('recording');
                         addTranscriptEntry('system', 'Reconnected.');
                         startWaveform();
+                        // Same enableMic-after-connect dance as the
+                        // initial connect — pipecat client-js 1.7.0
+                        // does not actually start mic capture without
+                        // an explicit enableMic(true) call after the
+                        // WebSocketTransport handshake completes.
+                        try {
+                          if (pipecatClient && typeof pipecatClient.enableMic === 'function') {
+                            var pp = pipecatClient.enableMic(true);
+                            if (pp && typeof pp.then === 'function') {
+                              pp.catch(function (err) { console.error('[WarRoom] reconnect enableMic failed:', err); });
+                            }
+                          }
+                        } catch (err) { console.error('[WarRoom] reconnect enableMic threw:', err); }
                       },
                       onDisconnected: function() {
                         // Second disconnect = give up
