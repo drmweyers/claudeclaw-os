@@ -1161,23 +1161,7 @@ function HistoryList() {
       )}
       <div class="space-y-1.5">
         {items.map((t) => (
-          <div key={t.id} class="bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-3">
-            <div class="flex items-center gap-2 mb-1">
-              <Pill tone={t.status as any}>{t.status}</Pill>
-              <span class="text-[10.5px] text-[var(--color-text-faint)] tabular-nums uppercase tracking-wider">{t.id.slice(0, 6)}</span>
-              {t.assigned_agent && <span class="text-[11px] text-[var(--color-text-muted)]">@{t.assigned_agent}</span>}
-              <span class="ml-auto text-[10.5px] text-[var(--color-text-faint)]">
-                {formatRelativeTime(t.completed_at || t.created_at)}
-              </span>
-            </div>
-            <div class="text-[13px] text-[var(--color-text)] mb-1">{t.title}</div>
-            {t.result && (
-              <div class="text-[11.5px] text-[var(--color-text-muted)] whitespace-pre-wrap line-clamp-3 leading-relaxed">{t.result}</div>
-            )}
-            {t.error && (
-              <div class="text-[11.5px] text-[var(--color-status-failed)] whitespace-pre-wrap line-clamp-2 font-mono">{t.error}</div>
-            )}
-          </div>
+          <HistoryItem key={t.id} task={t} />
         ))}
       </div>
       {offset < total && (
@@ -1192,6 +1176,76 @@ function HistoryList() {
       )}
       {items.length === 0 && !loading && !error && (
         <div class="text-center text-[11.5px] text-[var(--color-text-faint)] py-12">No completed tasks yet</div>
+      )}
+    </div>
+  );
+}
+
+// Single task row in the history drawer. Click to expand the full
+// result inline; "Re-send" pushes the result through the main bot to
+// Telegram. Re-send exists because sub-agent bots that hadn't been
+// /start'd by Mark dropped their initial deliveries on the floor —
+// main is the reliable redelivery channel.
+function HistoryItem({ task }: { task: MissionTask }) {
+  const [expanded, setExpanded] = useState(false);
+  const [resending, setResending] = useState(false);
+  const canResend = task.status === 'completed' && !!task.result;
+
+  async function resend(e: Event) {
+    e.stopPropagation();
+    setResending(true);
+    try {
+      await apiPost(`/api/mission/tasks/${task.id}/redeliver`);
+      pushToast({ tone: 'success', title: 'Re-sent to Telegram', description: `via main · @${task.assigned_agent || 'main'}'s result for "${task.title}"` });
+    } catch (err: any) {
+      pushToast({ tone: 'error', title: 'Re-send failed', description: err?.message || String(err), durationMs: 6000 });
+    } finally { setResending(false); }
+  }
+
+  const hasResult = !!task.result;
+  return (
+    <div
+      class={[
+        'bg-[var(--color-elevated)] border border-[var(--color-border)] rounded p-3 transition-colors',
+        hasResult ? 'cursor-pointer hover:border-[var(--color-border-strong)]' : '',
+      ].join(' ')}
+      onClick={() => { if (hasResult) setExpanded((v) => !v); }}
+    >
+      <div class="flex items-center gap-2 mb-1">
+        <Pill tone={task.status as any}>{task.status}</Pill>
+        <span class="text-[10.5px] text-[var(--color-text-faint)] tabular-nums uppercase tracking-wider">{task.id.slice(0, 6)}</span>
+        {task.assigned_agent && <span class="text-[11px] text-[var(--color-text-muted)]">@{task.assigned_agent}</span>}
+        {canResend && (
+          <button
+            type="button"
+            onClick={resend}
+            disabled={resending}
+            title="Re-send result to Telegram via main bot"
+            class="ml-auto inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-card)] border border-[var(--color-border)] disabled:opacity-40"
+          >
+            {resending ? '…' : 'Re-send'}
+          </button>
+        )}
+        <span class={canResend ? 'text-[10.5px] text-[var(--color-text-faint)]' : 'ml-auto text-[10.5px] text-[var(--color-text-faint)]'}>
+          {formatRelativeTime(task.completed_at || task.created_at)}
+        </span>
+      </div>
+      <div class="text-[13px] text-[var(--color-text)] mb-1">{task.title}</div>
+      {task.result && (
+        <div class={[
+          'text-[11.5px] text-[var(--color-text-muted)] whitespace-pre-wrap leading-relaxed',
+          expanded ? '' : 'line-clamp-3',
+        ].join(' ')}>
+          {task.result}
+        </div>
+      )}
+      {task.error && (
+        <div class="text-[11.5px] text-[var(--color-status-failed)] whitespace-pre-wrap line-clamp-2 font-mono">{task.error}</div>
+      )}
+      {hasResult && (
+        <div class="text-[10px] text-[var(--color-text-faint)] mt-1.5">
+          {expanded ? 'Click to collapse' : 'Click to expand full result'}
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import {
   LayoutGrid, ListTodo, Users, MessageSquare,
-  Brain, Network, Activity, ShieldCheck,
+  Brain, Network, Activity, ShieldCheck, BookOpen,
   Swords,
   Settings,
 } from 'lucide-preact';
@@ -27,6 +27,7 @@ export const ROUTES: RouteDef[] = [
 
   { path: '/memories',   label: 'Memories',        section: 'intelligence', icon: Brain,         shortcut: 'g e' },
   { path: '/hive',       label: 'Hive Mind',       section: 'intelligence', icon: Network,       shortcut: 'g h' },
+  { path: '/skills',     label: 'Skills',          section: 'intelligence', icon: BookOpen,      shortcut: 'g k' },
   { path: '/usage',      label: 'Usage',           section: 'intelligence', icon: Activity,      shortcut: 'g u' },
   { path: '/audit',      label: 'Audit',           section: 'intelligence', icon: ShieldCheck                   },
 

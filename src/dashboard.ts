@@ -95,6 +95,7 @@ import {
 } from './agent-create.js';
 import { getMainModelOverride, processMessageFromDashboard } from './bot.js';
 import { getDashboardHtml } from './dashboard-html.js';
+import { listSharedSkills, getSharedSkillDetail } from './skills-shared.js';
 import { getWarRoomHtml } from './warroom-html.js';
 import { getWarRoomPickerHtml } from './warroom-text-picker-html.js';
 import { getWarRoomTextHtml } from './warroom-text-html.js';
@@ -1644,6 +1645,43 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     return c.json({ ok: true, assigned_agent: agent, category: category ?? task.category });
   });
 
+  // Re-deliver a completed task's result to Mark via the main bot.
+  // Use case: a sub-agent finished a task before its own bot had a
+  // chat_id with Mark (the GrammyError "chat not found" path), so the
+  // result landed in the DB but never hit Telegram. Main bot always has
+  // ALLOWED_CHAT_ID, so it's the reliable redelivery channel.
+  app.post('/api/mission/tasks/:id/redeliver', async (c) => {
+    const id = c.req.param('id');
+    const task = getMissionTask(id);
+    if (!task) return c.json({ error: 'Not found' }, 404);
+    if (task.status !== 'completed' || !task.result) {
+      return c.json({ error: 'Task has no completed result to deliver' }, 400);
+    }
+    if (!botApi || !ALLOWED_CHAT_ID) {
+      return c.json({ error: 'Main bot or ALLOWED_CHAT_ID not configured' }, 503);
+    }
+    try {
+      const header = `Re-delivered result from @${task.assigned_agent || 'main'}\n${task.title}\n`;
+      // Telegram caps a single message at ~4096 chars. Chunk safely.
+      const MAX = 3800;
+      const chunks: string[] = [];
+      let remaining = header + '\n' + task.result;
+      while (remaining.length > MAX) {
+        const cut = remaining.lastIndexOf('\n', MAX) || MAX;
+        chunks.push(remaining.slice(0, cut));
+        remaining = remaining.slice(cut);
+      }
+      if (remaining.length > 0) chunks.push(remaining);
+      for (const chunk of chunks) {
+        await botApi.sendMessage(ALLOWED_CHAT_ID, chunk);
+      }
+      return c.json({ ok: true, chunks: chunks.length });
+    } catch (err) {
+      logger.error({ err, taskId: id }, 'redeliver failed');
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   app.patch('/api/mission/tasks/:id', async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json<{ assigned_agent?: string; category?: string | null }>();
@@ -1921,6 +1959,23 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
       pid: process.pid,
       chatId: chatId || null,
     });
+  });
+
+  // ── Shared Skills (cross-agent knowledge library) ────────────────────
+  // Source: <workspace>/second-brain/shared-skills/. Read by Mark and
+  // every agent. The dashboard surfaces it as a browsable catalog with
+  // category grouping + per-skill detail viewer.
+
+  app.get('/api/skills', (c) => {
+    const { root, skills } = listSharedSkills();
+    return c.json({ root, skills });
+  });
+
+  app.get('/api/skills/:id', (c) => {
+    const id = c.req.param('id');
+    const detail = getSharedSkillDetail(id);
+    if (!detail) return c.json({ error: 'skill not found' }, 404);
+    return c.json({ skill: detail });
   });
 
   // ── Agent endpoints ──────────────────────────────────────────────────
