@@ -533,7 +533,11 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   // Serve War Room background music (user's custom music.mp3 first, then bundled entrance.mp3)
   app.get('/warroom-music', (c) => {
     const musicPath = path.join(PROJECT_ROOT, 'warroom', 'music.mp3');
-    if (!fs.existsSync(musicPath)) return c.text('', 404);
+    // No music uploaded yet is the steady state for fresh installs (the
+    // bundled track was removed in 7d24306). Return 204 so the
+    // <audio>'s <source> element silently gives up instead of spamming
+    // a console 404 on every War Room page load.
+    if (!fs.existsSync(musicPath)) return c.body(null, 204);
     const data = fs.readFileSync(musicPath);
     return new Response(data, {
       headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'public, max-age=86400' },
@@ -2633,7 +2637,13 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
   app.get('/api/agents/:id/avatar', async (c) => {
     const agentId = c.req.param('id');
     if (!AGENT_ID_RE.test(agentId)) return c.json({ error: 'invalid id' }, 400);
-    if (!agentExists(agentId)) return c.json({ error: 'agent not found' }, 404);
+    // The War Room stage hardcodes 5 seats (main + 4 sub-agents) but
+    // not every install has all 5 configured (e.g. comms/agent.yaml is
+    // optional). Return 204 instead of 404 here so the <img> for an
+    // unconfigured seat fails silently rather than producing a noisy
+    // console error. The "no avatar found" path below already returns
+    // 204 — this aligns "no agent" with the same quiet behaviour.
+    if (!agentExists(agentId)) return c.body(null, 204);
     const ctxQ = c.req.query('context');
     const context: 'default' | 'meet' = ctxQ === 'meet' ? 'meet' : 'default';
 

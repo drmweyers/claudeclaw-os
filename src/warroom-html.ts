@@ -1124,7 +1124,7 @@ async function reloadMeetingAfterRespawn(statusLabel, targetAgent) {
         onUserTranscript: function(d) {
           if (d && d.final) addTranscriptEntry('You', d.text);
         },
-        onBotTranscript: function(d) {
+        onBotOutput: function(d) {
           if (d) addTranscriptEntry(statusLabel, d.text || '', targetAgent || 'main');
         },
         onServerMessage: function(msg) { handleServerMessage(msg); },
@@ -1519,7 +1519,7 @@ async function togglePin(agentId) {
         onUserTranscript: function(d) {
           if (d && d.final) addTranscriptEntry('You', d.text);
         },
-        onBotTranscript: function(d) {
+        onBotOutput: function(d) {
           if (d) addTranscriptEntry(statusLabel, d.text || '', targetAgent || 'main');
         },
         onServerMessage: function(msg) { handleServerMessage(msg); },
@@ -1942,7 +1942,7 @@ async function toggleMeeting() {
                       },
                       onBotReady: function() {},
                       onUserTranscript: function(data) { if (data && data.final) addTranscriptEntry('You', data.text); },
-                      onBotTranscript: function(data) { if (data) addTranscriptEntry('Agent', data.text || '', 'main'); },
+                      onBotOutput: function(data) { if (data) addTranscriptEntry('Agent', data.text || '', 'main'); },
                       onServerMessage: function(msg) { handleServerMessage(msg); },
                       onError: function(err) { console.error('[WarRoom] Reconnect error:', err); },
                     },
@@ -1972,7 +1972,7 @@ async function toggleMeeting() {
                 addTranscriptEntry('You', data.text);
               }
             },
-            onBotTranscript: function(data) {
+            onBotOutput: function(data) {
               if (data) addTranscriptEntry('Agent', data.text || '', 'main');
             },
             onServerMessage: function(msg) { handleServerMessage(msg); },
