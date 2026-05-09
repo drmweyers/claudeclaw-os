@@ -21,6 +21,12 @@ import {
   getDashboardTopAccessedMemories,
   getDashboardMemoriesList,
   getDashboardMemoryTimeline,
+  createMissionTask,
+  completeMissionTask,
+  cancelMissionTask,
+  createScheduledTask,
+  updateTaskAfterRun,
+  getHiveMindEntries,
 } from './db.js';
 
 describe('database', () => {
@@ -408,6 +414,87 @@ describe('database', () => {
       expect(timeline.length).toBeGreaterThanOrEqual(1);
       expect(timeline[0]).toHaveProperty('date');
       expect(timeline[0]).toHaveProperty('count');
+    });
+  });
+
+  // ── Hive Mind lifecycle auto-logging ──────────────────────────────
+  // README §Hive Mind: "Every meaningful action by any agent — a war-room
+  // reply, a finished mission task, a tool call, a scheduled run — lands
+  // in one shared `hive_mind` table." Mission + scheduled wiring lives
+  // at the db-layer functions so every CLI/dashboard/scheduler caller
+  // is covered without per-callsite changes.
+  describe('hive_mind lifecycle auto-logging', () => {
+    it('createMissionTask logs a mission_queued entry attributed to the creator', () => {
+      createMissionTask('m1', 'Triage inbox', 'Check unread emails', 'ops', 'main', 5);
+      const entries = getHiveMindEntries(50);
+      const queued = entries.filter(e => e.action === 'mission_queued');
+      expect(queued).toHaveLength(1);
+      expect(queued[0].agent_id).toBe('main');
+      expect(queued[0].summary).toContain('ops');
+      expect(queued[0].summary).toContain('Triage inbox');
+    });
+
+    it('createMissionTask without an assignee still logs (attributed to creator)', () => {
+      createMissionTask('m2', 'Unassigned task', 'Do something', null, 'dashboard', 0);
+      const queued = getHiveMindEntries(50).filter(e => e.action === 'mission_queued');
+      expect(queued).toHaveLength(1);
+      expect(queued[0].agent_id).toBe('dashboard');
+    });
+
+    it('completeMissionTask logs mission_completed attributed to the assigned agent', () => {
+      createMissionTask('m3', 'Research peptide X', 'Find recent trials', 'research', 'main', 5);
+      completeMissionTask('m3', 'Found 3 trials, all phase 2.', 'completed');
+      const completed = getHiveMindEntries(50).filter(e => e.action === 'mission_completed');
+      expect(completed).toHaveLength(1);
+      expect(completed[0].agent_id).toBe('research');
+      expect(completed[0].summary).toContain('Research peptide X');
+    });
+
+    it('completeMissionTask with status=failed logs mission_failed with error', () => {
+      createMissionTask('m4', 'Send email', 'mail to john', 'comms', 'main');
+      completeMissionTask('m4', null, 'failed', 'SMTP unreachable');
+      const failed = getHiveMindEntries(50).filter(e => e.action === 'mission_failed');
+      expect(failed).toHaveLength(1);
+      expect(failed[0].agent_id).toBe('comms');
+      expect(failed[0].summary).toContain('SMTP unreachable');
+    });
+
+    it('cancelMissionTask on a queued task logs mission_cancelled', () => {
+      createMissionTask('m5', 'Schedule meeting', 'book Tuesday 2pm', 'ops', 'main');
+      const ok = cancelMissionTask('m5');
+      expect(ok).toBe(true);
+      const cancelled = getHiveMindEntries(50).filter(e => e.action === 'mission_cancelled');
+      expect(cancelled).toHaveLength(1);
+      expect(cancelled[0].agent_id).toBe('ops');
+    });
+
+    it('cancelMissionTask on a non-cancellable task does NOT log', () => {
+      createMissionTask('m6', 'X', 'y', 'ops', 'main');
+      completeMissionTask('m6', 'done', 'completed');
+      const before = getHiveMindEntries(50).filter(e => e.action === 'mission_cancelled').length;
+      const ok = cancelMissionTask('m6'); // already completed → no-op
+      expect(ok).toBe(false);
+      const after = getHiveMindEntries(50).filter(e => e.action === 'mission_cancelled').length;
+      expect(after).toBe(before);
+    });
+
+    it('updateTaskAfterRun logs scheduled_run attributed to the task agent', () => {
+      const future = Math.floor(Date.now() / 1000) + 3600;
+      createScheduledTask('s1', 'Daily standup digest', '0 9 * * *', future, 'research');
+      updateTaskAfterRun('s1', future + 86400, 'Found 4 new mentions today.', 'success');
+      const runs = getHiveMindEntries(50).filter(e => e.action === 'scheduled_run');
+      expect(runs).toHaveLength(1);
+      expect(runs[0].agent_id).toBe('research');
+      expect(runs[0].summary).toContain('Daily standup digest');
+    });
+
+    it('updateTaskAfterRun with status=timeout marks the entry accordingly', () => {
+      const future = Math.floor(Date.now() / 1000) + 3600;
+      createScheduledTask('s2', 'Long crawl', '0 * * * *', future, 'ops');
+      updateTaskAfterRun('s2', future + 3600, 'aborted after 10m', 'timeout');
+      const runs = getHiveMindEntries(50).filter(e => e.action === 'scheduled_run');
+      expect(runs).toHaveLength(1);
+      expect(runs[0].summary.toLowerCase()).toContain('timeout');
     });
   });
 });

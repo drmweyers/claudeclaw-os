@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-import { DB_ENCRYPTION_KEY, STORE_DIR } from './config.js';
+import { ALLOWED_CHAT_ID, DB_ENCRYPTION_KEY, STORE_DIR } from './config.js';
 import { cosineSimilarity } from './embeddings.js';
 import { logger } from './logger.js';
 
@@ -1302,9 +1302,22 @@ export function updateTaskAfterRun(
   lastStatus: 'success' | 'failed' | 'timeout' = 'success',
 ): void {
   const now = Math.floor(Date.now() / 1000);
+  const task = db
+    .prepare('SELECT agent_id, prompt FROM scheduled_tasks WHERE id = ?')
+    .get(id) as { agent_id: string; prompt: string } | undefined;
   db.prepare(
     `UPDATE scheduled_tasks SET status = 'active', last_run = ?, next_run = ?, last_result = ?, last_status = ?, started_at = NULL WHERE id = ?`,
   ).run(now, nextRun, result.slice(0, 4000), lastStatus, id);
+  if (task) {
+    const promptPreview = task.prompt.slice(0, 80);
+    const tail =
+      lastStatus === 'success'
+        ? `: ${result.slice(0, 80)}`
+        : lastStatus === 'timeout'
+          ? ' (timeout)'
+          : ` (failed): ${result.slice(0, 60)}`;
+    logToHiveMind(task.agent_id, ALLOWED_CHAT_ID, 'scheduled_run', `${promptPreview}${tail}`);
+  }
 }
 
 export function resetStuckTasks(agentId: string): number {
@@ -2193,6 +2206,10 @@ export function createMissionTask(
     `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, category, created_at)
      VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
   ).run(id, title, prompt, assignedAgent, createdBy, priority, safeCategory, now);
+  const summary = assignedAgent
+    ? `Queued '${title}' → ${assignedAgent}`
+    : `Queued '${title}' (unassigned)`;
+  logToHiveMind(createdBy, ALLOWED_CHAT_ID, 'mission_queued', summary);
 }
 
 // Set or clear a task's category. Returns false on unknown values
@@ -2276,15 +2293,34 @@ export function completeMissionTask(
   error?: string,
 ): void {
   const now = Math.floor(Date.now() / 1000);
+  const task = db
+    .prepare('SELECT title, assigned_agent, created_by FROM mission_tasks WHERE id = ?')
+    .get(id) as { title: string; assigned_agent: string | null; created_by: string } | undefined;
   db.prepare(
     `UPDATE mission_tasks SET status = ?, result = ?, error = ?, completed_at = ? WHERE id = ?`,
   ).run(status, result, error ?? null, now, id);
+  if (task) {
+    const actor = task.assigned_agent ?? task.created_by;
+    const action = status === 'completed' ? 'mission_completed' : 'mission_failed';
+    const detail =
+      status === 'completed'
+        ? `: ${(result ?? '').slice(0, 80)}`
+        : `: ${(error ?? 'unknown error').slice(0, 80)}`;
+    logToHiveMind(actor, ALLOWED_CHAT_ID, action, `'${task.title}'${detail}`);
+  }
 }
 
 export function cancelMissionTask(id: string): boolean {
+  const task = db
+    .prepare('SELECT title, assigned_agent, created_by FROM mission_tasks WHERE id = ?')
+    .get(id) as { title: string; assigned_agent: string | null; created_by: string } | undefined;
   const result = db.prepare(
     `UPDATE mission_tasks SET status = 'cancelled', completed_at = ? WHERE id = ? AND status IN ('queued', 'running')`,
   ).run(Math.floor(Date.now() / 1000), id);
+  if (result.changes > 0 && task) {
+    const actor = task.assigned_agent ?? task.created_by;
+    logToHiveMind(actor, ALLOWED_CHAT_ID, 'mission_cancelled', `Cancelled '${task.title}'`);
+  }
   return result.changes > 0;
 }
 
