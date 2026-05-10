@@ -202,6 +202,18 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_hive_mind_agent ON hive_mind(agent_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_hive_mind_time ON hive_mind(created_at DESC);
 
+    -- Tracks Obsidian vault files that have been ingested into memories.
+    -- Path is relative to the vault root. memory_ids is a JSON array of
+    -- the memory rows produced for this file (one per agent). On re-sync,
+    -- if content_hash matches we skip; if not, we delete the listed
+    -- memory_ids and re-ingest.
+    CREATE TABLE IF NOT EXISTS vault_sync_state (
+      path          TEXT PRIMARY KEY,
+      content_hash  TEXT NOT NULL,
+      memory_ids    TEXT NOT NULL,
+      last_synced   INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS inter_agent_tasks (
       id            TEXT PRIMARY KEY,
       from_agent    TEXT NOT NULL,
@@ -2002,6 +2014,59 @@ export function getHiveMindEntries(limit = 20, agentId?: string): HiveMindEntry[
   return db
     .prepare('SELECT * FROM hive_mind ORDER BY created_at DESC LIMIT ?')
     .all(limit) as HiveMindEntry[];
+}
+
+// ── Vault Sync State ───────────────────────────────────────────────
+
+export interface VaultSyncState {
+  path: string;
+  content_hash: string;
+  memory_ids: number[];
+  last_synced: number;
+}
+
+export function getVaultSyncState(path: string): VaultSyncState | null {
+  const row = db
+    .prepare('SELECT path, content_hash, memory_ids, last_synced FROM vault_sync_state WHERE path = ?')
+    .get(path) as { path: string; content_hash: string; memory_ids: string; last_synced: number } | undefined;
+  if (!row) return null;
+  return {
+    path: row.path,
+    content_hash: row.content_hash,
+    memory_ids: JSON.parse(row.memory_ids) as number[],
+    last_synced: row.last_synced,
+  };
+}
+
+export function upsertVaultSyncState(
+  path: string,
+  contentHash: string,
+  memoryIds: number[],
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  db.prepare(
+    `INSERT INTO vault_sync_state (path, content_hash, memory_ids, last_synced)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(path) DO UPDATE SET content_hash = excluded.content_hash,
+                                     memory_ids   = excluded.memory_ids,
+                                     last_synced  = excluded.last_synced`,
+  ).run(path, contentHash, JSON.stringify(memoryIds), now);
+}
+
+export function deleteVaultSyncState(path: string): void {
+  db.prepare('DELETE FROM vault_sync_state WHERE path = ?').run(path);
+}
+
+export function getAllVaultSyncPaths(): string[] {
+  const rows = db.prepare('SELECT path FROM vault_sync_state').all() as Array<{ path: string }>;
+  return rows.map((r) => r.path);
+}
+
+export function deleteMemoriesByIds(ids: number[]): number {
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const result = db.prepare(`DELETE FROM memories WHERE id IN (${placeholders})`).run(...ids);
+  return result.changes;
 }
 
 /**
