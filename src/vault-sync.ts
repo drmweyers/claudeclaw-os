@@ -2,17 +2,23 @@
  * Obsidian vault → memory bridge.
  *
  * Scans the curated set of folders under the second-brain vault and
- * ingests each markdown file as a vector-embedded memory row, replicated
- * once per agent so per-agent searchMemories() sees it without needing
- * a "shared" tier in the existing query layer.
+ * ingests each markdown file as one or more vector-embedded memory rows,
+ * replicated once per agent so per-agent searchMemories() sees them
+ * without needing a "shared" tier in the existing query layer.
+ *
+ * Chunking strategy (v2): files are split on H2 headers (`^## `). Each
+ * H2 section becomes its own chunk; pre-H2 content (frontmatter + H1 +
+ * intro paragraphs) becomes the "_intro" chunk. Files with no H2 fall
+ * back to a single whole-note intro chunk. Tiny chunks (<200 chars) are
+ * merged into a neighbour to avoid stub spam.
  *
  * Dedup is content-hash based via the vault_sync_state table. Re-syncs
- * skip unchanged files; changed files have their old memory rows
- * deleted and re-ingested.
+ * skip unchanged files; changed files have ALL their old memory rows
+ * deleted and re-chunked from scratch (no per-chunk diffing).
  *
- * Embeddings are generated once per file (Gemini gemini-embedding-001)
- * and reused across the per-agent rows — embedding text doesn't change
- * between agents.
+ * Embeddings are generated once per chunk (Gemini gemini-embedding-001)
+ * and reused across the per-agent rows for that chunk — embedding text
+ * doesn't change between agents.
  */
 
 import crypto from 'crypto';
@@ -47,15 +53,19 @@ export const INCLUDED_FOLDERS = [
 
 // Files smaller than this are noise (frontmatter-only stubs, blank notes).
 const MIN_FILE_BYTES = 100;
-// Gemini embedding has a token cap. Anything past this is split-or-skip
-// territory; for v1 we skip and log so a follow-up pass can chunk.
-const MAX_FILE_BYTES = 50_000;
+// Per-chunk byte cap. Anything above this is skipped + logged (one section
+// shouldn't be a 20KB wall — likely transcript dump, embed will degrade).
+const MAX_CHUNK_BYTES = 20_000;
+// Below this length a chunk gets merged into a neighbour rather than
+// becoming its own row. Stops H2 stubs from spamming the memories table.
+const MIN_CHUNK_CHARS = 200;
 
 // Vault content baseline — above the 0.5 save threshold, below conversation
 // memories that can score 0.8+ on importance.
 const VAULT_IMPORTANCE = 0.6;
 
 const SOURCE_PREFIX = 'vault:';
+const INTRO_SLUG = '_intro';
 
 export interface SyncStats {
   added: number;
@@ -84,6 +94,15 @@ interface VaultFile {
   absPath: string;
   relPath: string;
   size: number;
+}
+
+interface Chunk {
+  /** Slug for the source field (e.g. "section-one" or "_intro"). */
+  slug: string;
+  /** Heading text used for the chunk's summary. */
+  heading: string;
+  /** Full chunk text, embedded and stored as raw_text. */
+  text: string;
 }
 
 async function walkFolder(root: string, folder: string): Promise<VaultFile[]> {
@@ -131,12 +150,29 @@ function hashContent(text: string): string {
 }
 
 /**
- * Pull a one-line summary from the note. Prefers the first markdown H1;
- * falls back to the first non-empty, non-frontmatter line; final fallback
- * is the file name.
+ * Slugify a heading: lowercase, non-alphanumerics → "-", collapse runs,
+ * trim. Deterministic so re-syncs produce stable source fields.
+ * Bounded length so headings can't blow up the source column.
  */
-function deriveSummary(text: string, relPath: string): string {
-  const lines = text.split(/\r?\n/);
+function slugifyHeading(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return slug.length > 0 ? slug : 'section';
+}
+
+/**
+ * Pull a one-line summary from a chunk. For an intro chunk, prefers the
+ * first H1; for an H2 chunk, the heading text itself. Final fallback is
+ * the file name.
+ */
+function deriveChunkSummary(chunk: Chunk, relPath: string): string {
+  if (chunk.heading) return chunk.heading.slice(0, 200);
+  // Intro fallback: scan for an H1.
+  const lines = chunk.text.split(/\r?\n/);
   let inFrontmatter = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -160,6 +196,73 @@ function deriveSummary(text: string, relPath: string): string {
 function deriveTopics(relPath: string): string[] {
   const parts = relPath.split('/').slice(0, -1);
   return parts.filter((p) => p.length > 0);
+}
+
+/**
+ * Split a markdown file into H2-section chunks.
+ *
+ * - chunks[0] = intro (frontmatter + H1 + any text above the first ##)
+ * - chunks[1..N] = one per H2, starting at the heading line
+ *
+ * Tiny chunks (<MIN_CHUNK_CHARS) are merged into a neighbour: backward
+ * by default, forward if there's no previous chunk (orphaned intro).
+ *
+ * If no H2 is found, returns a single intro chunk containing the whole file.
+ */
+export function chunkMarkdown(content: string): Chunk[] {
+  const lines = content.split(/\r?\n/);
+  const sections: Array<{ heading: string; lines: string[] }> = [];
+  let current: { heading: string; lines: string[] } = { heading: '', lines: [] };
+
+  for (const line of lines) {
+    const h2Match = /^## (.+)$/.exec(line);
+    if (h2Match) {
+      sections.push(current);
+      current = { heading: h2Match[1].trim(), lines: [line] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  sections.push(current);
+
+  // Build raw chunks (intro + each H2). Drop the intro if it's empty (no
+  // prefix content), since splitting a file that starts with "## ..." gives
+  // an empty first section.
+  const raw: Chunk[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    const text = s.lines.join('\n');
+    if (i === 0 && text.trim().length === 0) continue; // empty intro
+    raw.push({
+      slug: i === 0 ? INTRO_SLUG : slugifyHeading(s.heading),
+      heading: s.heading,
+      text,
+    });
+  }
+
+  if (raw.length === 0) {
+    // Pathological: file with nothing parseable. One intro chunk holding the raw text.
+    return [{ slug: INTRO_SLUG, heading: '', text: content }];
+  }
+
+  // Merge tiny chunks. Backward by default, forward if no predecessor.
+  const merged: Chunk[] = [];
+  for (const c of raw) {
+    if (c.text.length < MIN_CHUNK_CHARS && merged.length > 0) {
+      const prev = merged[merged.length - 1];
+      prev.text = prev.text + '\n\n' + c.text;
+    } else {
+      merged.push({ ...c });
+    }
+  }
+
+  // Catch an orphaned tiny first chunk: merge it forward into the second.
+  if (merged.length >= 2 && merged[0].text.length < MIN_CHUNK_CHARS) {
+    const orphan = merged.shift()!;
+    merged[0].text = orphan.text + '\n\n' + merged[0].text;
+  }
+
+  return merged;
 }
 
 export async function syncVault(opts: SyncOptions): Promise<SyncStats> {
@@ -196,7 +299,6 @@ export async function syncVault(opts: SyncOptions): Promise<SyncStats> {
     seenPaths.add(file.relPath);
 
     if (file.size < MIN_FILE_BYTES) { stats.skippedTooSmall++; continue; }
-    if (file.size > MAX_FILE_BYTES) { stats.skippedTooLarge++; continue; }
 
     let content: string;
     try {
@@ -214,53 +316,85 @@ export async function syncVault(opts: SyncOptions): Promise<SyncStats> {
       continue;
     }
 
-    // Generate embedding (one call per file, reused across agent rows).
-    let embedding: number[];
-    try {
-      embedding = await embed(content);
-    } catch (err) {
-      stats.errors.push({
-        path: file.relPath,
-        error: `embed failed: ${err instanceof Error ? err.message : String(err)}`,
-      });
+    // Split into chunks first so we know what we're embedding.
+    const chunks = chunkMarkdown(content);
+
+    // Filter out oversized chunks (one section ballooning to >20KB).
+    const acceptedChunks: Chunk[] = [];
+    for (const c of chunks) {
+      if (Buffer.byteLength(c.text, 'utf-8') > MAX_CHUNK_BYTES) {
+        stats.skippedTooLarge++;
+        logger.warn({ relPath: file.relPath, slug: c.slug, bytes: c.text.length }, 'vault-sync: chunk too large, skipping');
+        continue;
+      }
+      acceptedChunks.push(c);
+    }
+
+    if (acceptedChunks.length === 0) {
+      // Every chunk was too large to embed — nothing to do, but don't strand
+      // a previous state row pointing at deleted memories.
+      if (prev && prev.memory_ids.length > 0) {
+        deleteMemoriesByIds(prev.memory_ids);
+        deleteVaultSyncState(file.relPath);
+      }
       continue;
     }
 
-    // Delete prior memory rows if updating.
+    // Delete prior memory rows if updating (whole-file replace, no per-chunk diff).
     if (prev && prev.memory_ids.length > 0) {
       deleteMemoriesByIds(prev.memory_ids);
     }
 
-    const summary = deriveSummary(content, file.relPath);
     const topics = deriveTopics(file.relPath);
-    const source = SOURCE_PREFIX + file.relPath;
     const memoryIds: number[] = [];
+    let chunkSucceeded = false;
 
-    for (const agentId of agents) {
+    for (const chunk of acceptedChunks) {
+      // Generate embedding (one call per chunk, reused across agent rows).
+      let embedding: number[];
       try {
-        const id = saveStructuredMemoryAtomic(
-          chatId,
-          content,
-          summary,
-          [],
-          topics,
-          VAULT_IMPORTANCE,
-          embedding,
-          source,
-          agentId,
-        );
-        memoryIds.push(id);
+        embedding = await embed(chunk.text);
       } catch (err) {
         stats.errors.push({
           path: file.relPath,
-          error: `save (${agentId}) failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: `embed (${chunk.slug}) failed: ${err instanceof Error ? err.message : String(err)}`,
         });
+        continue;
+      }
+
+      const summary = deriveChunkSummary(chunk, file.relPath);
+      const source = SOURCE_PREFIX + file.relPath + '#' + chunk.slug;
+
+      for (const agentId of agents) {
+        try {
+          const id = saveStructuredMemoryAtomic(
+            chatId,
+            chunk.text,
+            summary,
+            [],
+            topics,
+            VAULT_IMPORTANCE,
+            embedding,
+            source,
+            agentId,
+          );
+          memoryIds.push(id);
+          chunkSucceeded = true;
+        } catch (err) {
+          stats.errors.push({
+            path: file.relPath,
+            error: `save (${chunk.slug}/${agentId}) failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
       }
     }
 
     if (memoryIds.length > 0) {
       upsertVaultSyncState(file.relPath, hash, memoryIds);
       if (prev) stats.updated++; else stats.added++;
+    } else if (prev && !chunkSucceeded) {
+      // Update wiped old rows but nothing replaced them — clear state too.
+      deleteVaultSyncState(file.relPath);
     }
 
     processed++;
