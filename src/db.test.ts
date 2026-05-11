@@ -419,10 +419,11 @@ describe('database', () => {
 
   // ── Hive Mind lifecycle auto-logging ──────────────────────────────
   // README §Hive Mind: "Every meaningful action by any agent — a war-room
-  // reply, a finished mission task, a tool call, a scheduled run — lands
-  // in one shared `hive_mind` table." Mission + scheduled wiring lives
-  // at the db-layer functions so every CLI/dashboard/scheduler caller
-  // is covered without per-callsite changes.
+  // reply, a queued or finished mission task, a delegation to another
+  // agent, a scheduled run, an end-of-chat session arc — lands in one
+  // shared `hive_mind` table." Mission + scheduled wiring lives at the
+  // db-layer functions so every CLI/dashboard/scheduler caller is covered
+  // without per-callsite changes.
   describe('hive_mind lifecycle auto-logging', () => {
     it('createMissionTask logs a mission_queued entry attributed to the creator', () => {
       createMissionTask('m1', 'Triage inbox', 'Check unread emails', 'ops', 'main', 5);

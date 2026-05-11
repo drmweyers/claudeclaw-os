@@ -1149,13 +1149,13 @@ High-importance memories (0.8+) trigger a Telegram notification when saved, givi
 
 ## Hive Mind
 
-While Memory is what each agent remembers about you, **Hive Mind** is what every agent can see about each other. Every meaningful action by any agent — a war-room reply, a finished mission task, a tool call, a scheduled run — lands in one shared `hive_mind` table. The dashboard turns that table into a real-time activity feed and a brain visualization you can hover.
+While Memory is what each agent remembers about you, **Hive Mind** is what every agent can see about each other. Every meaningful action by any agent — a war-room reply, a queued or finished mission task, a delegation to another agent, a scheduled run, an end-of-chat session arc — lands in one shared `hive_mind` table. The dashboard turns that table into a real-time activity feed and a brain visualization you can hover.
 
 ![Hive Mind data flow](assets/hive-mind-data-flow.png)
 
 The flow is the same regardless of which agent fires:
 
-1. **Source.** Some agent does something — finishes a task, replies in the war room, calls a tool.
+1. **Source.** Some agent does something — finishes a mission task, replies in the war room, fires a scheduled run, delegates to another agent.
 2. **Write.** `logToHiveMind()` inserts a row with `agent_id`, `chat_id`, `action`, `summary`, optional artifacts.
 3. **Stream.** The dashboard's SSE channel broadcasts the new row to every open tab.
 4. **Render.** The brain dispatches: 3D mode parents a new dot to the right lobe and fires a synapse arc; 2D mode increments the lobe's counter and pulses its glow.
