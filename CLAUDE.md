@@ -200,13 +200,35 @@ Available agents — delegate based on what Mark is asking for:
 | Agent | Owns | Delegate when Mark asks for… |
 |-------|------|-------------------------------|
 | `research` | Web research, peptides/longevity literature, competitive intel, BCI portfolio research | "research X", "deep dive on Y", "what's the literature on Z", "who are competitors", "market size for…" |
-| `content` | YouTube scripts, blog posts, email copy, lead magnets — **raw drafts only** | "write a post about…", "draft a YouTube script", "repurpose this blog", "create a lead magnet", "write me an email broadcast" |
-| `ops` | Calendar, inbox, billing, system health, **ALL SmartSocial** (generate, schedule, publish, inbox, analytics, platform mgmt) | "what's on my calendar", "triage my inbox", "post this to LinkedIn", "schedule these tweets", "check engagement this week", "is the bot running", "manage our social accounts" |
+| `content` | YouTube scripts, blog posts, email copy, lead magnets, **ALL SmartSocial** (generate, schedule, publish, inbox, analytics, platform mgmt) | "write a post about…", "draft a YouTube script", "repurpose this blog", "create a lead magnet", "post this to LinkedIn", "schedule these tweets", "check engagement this week", "manage our social accounts" |
+| `ops` | Calendar, inbox (email), billing, system health | "what's on my calendar", "triage my inbox", "is the bot running", "check Stripe" |
 | `comms` | (Reserved — set up later) | n/a |
 
-**SmartSocial routing rule:** ALL SmartSocial work (generate, schedule, publish, inbox, analytics, account management) goes to `ops`. Content agent writes raw drafts and hands them to ops for posting.
+**SmartSocial routing rule:** ALL SmartSocial work (generate, schedule, publish, inbox, analytics, account management) goes to `content`. Ops does NOT touch SmartSocial -- it owns calendar, email inbox, billing, and system health.
 
 Use `--priority 10` for high priority, `--priority 0` for low (default is 5).
+
+### Persona Selection (Pantheon)
+
+When delegating, you can optionally attach a `--persona <slug>` flag to force a cheaper or different model + system prompt + MCP allowlist on the mission. The persona is a preset bundle the scheduler reads at pickup time. Telegram replies driven by a persona get a footer like `via quick-check · claude-haiku-4-5 · $0.003` so Mark can see what ran.
+
+**Available personas** (see `personas/` for full configs):
+
+| Slug | Model | When to use it |
+|---|---|---|
+| `quick-check` | claude-haiku-4-5 | Trivial factual lookups: "is X true", "what's the half-life of Y", "summarize this in 3 lines", quick triage. Cheap and fast. No web/MCPs. Cap: $2/day. |
+
+**Default: no persona.** Most delegations should not use one — the agent's default model handles the work. Only attach `--persona quick-check` when the intent is genuinely a quick factual triage, NOT a research task, content task, or anything multi-step.
+
+```bash
+# Trivial lookup → use quick-check
+node "$PROJECT_ROOT/dist/mission-cli.js" create --agent research --persona quick-check --title "BPC-157 half-life" "What's the half-life of subcutaneous BPC-157?"
+
+# Multi-source research → no persona, let research agent use its default
+node "$PROJECT_ROOT/dist/mission-cli.js" create --agent research --title "BPC-157 deep dive" "Deep literature review on BPC-157 oral bioavailability — peer-reviewed sources, summary brief."
+```
+
+If you pick wrong, Mark sees the footer and corrects. Don't sweat it — Haiku is forgiving on the wrong side, Sonnet/Opus is forgiving on the right side.
 
 ## Sending Files via Telegram
 

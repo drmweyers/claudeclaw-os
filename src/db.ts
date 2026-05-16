@@ -752,6 +752,16 @@ function runMigrations(database: Database.Database): void {
       ON conversation_log(source, source_meeting_id, source_turn_id, agent_id)
       WHERE source != 'telegram' AND role = 'assistant';
   `);
+
+  // Pantheon: persona presets for mission tasks. `persona` = slug; `persona_snapshot`
+  // = JSON of the persona config captured at queue time (immune to file edits while
+  // a mission is in flight). NULL on both = no persona, use agent defaults.
+  addColumnIfMissing(database, 'mission_tasks', 'persona', `TEXT`);
+  addColumnIfMissing(database, 'mission_tasks', 'persona_snapshot', `TEXT`);
+  // token_usage now records which persona+model the spend was attributed to, so
+  // cost-cap checks and verifiability of "did Haiku really run" are possible.
+  addColumnIfMissing(database, 'token_usage', 'persona', `TEXT`);
+  addColumnIfMissing(database, 'token_usage', 'model', `TEXT`);
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -1762,12 +1772,31 @@ export function saveTokenUsage(
   costUsd: number,
   didCompact: boolean,
   agentId = 'main',
+  persona: string | null = null,
+  model: string | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    `INSERT INTO token_usage (chat_id, session_id, input_tokens, output_tokens, cache_read, context_tokens, cost_usd, did_compact, created_at, agent_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(chatId, sessionId ?? null, inputTokens, outputTokens, cacheRead, contextTokens, costUsd, didCompact ? 1 : 0, now, agentId);
+    `INSERT INTO token_usage (chat_id, session_id, input_tokens, output_tokens, cache_read, context_tokens, cost_usd, did_compact, created_at, agent_id, persona, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(chatId, sessionId ?? null, inputTokens, outputTokens, cacheRead, contextTokens, costUsd, didCompact ? 1 : 0, now, agentId, persona, model);
+}
+
+/**
+ * Total cost in USD for the given persona over the last 24 hours.
+ * Used by the scheduler to enforce a persona's daily_cost_cap_usd before
+ * dispatching a mission. Returns 0 if the persona has no recorded spend.
+ */
+export function getPersonaSpend24h(persona: string): number {
+  const cutoff = Math.floor(Date.now() / 1000) - 86400;
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd), 0) as total
+       FROM token_usage
+       WHERE persona = ? AND created_at >= ?`,
+    )
+    .get(persona, cutoff) as { total: number };
+  return row.total;
 }
 
 export interface SessionTokenSummary {
@@ -2251,6 +2280,11 @@ export interface MissionTask {
   created_at: number;
   started_at: number | null;
   completed_at: number | null;
+  /** Pantheon persona slug, e.g. 'quick-check'. NULL = no persona. */
+  persona: string | null;
+  /** JSON snapshot of the persona config at queue time. Source of truth for
+   *  scheduler — immune to file edits while the mission is in flight. */
+  persona_snapshot: string | null;
 }
 
 export function createMissionTask(
@@ -2261,6 +2295,8 @@ export function createMissionTask(
   createdBy = 'dashboard',
   priority = 0,
   category: MissionCategory | null = null,
+  persona: string | null = null,
+  personaSnapshot: string | null = null,
 ): void {
   const now = Math.floor(Date.now() / 1000);
   // Belt-and-braces: silently null any garbage that slips past callers.
@@ -2268,12 +2304,13 @@ export function createMissionTask(
   // values landing in the DB if a future caller skips that gate.
   const safeCategory: MissionCategory | null = isMissionCategory(category) ? category : null;
   db.prepare(
-    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, category, created_at)
-     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
-  ).run(id, title, prompt, assignedAgent, createdBy, priority, safeCategory, now);
+    `INSERT INTO mission_tasks (id, title, prompt, assigned_agent, status, created_by, priority, category, created_at, persona, persona_snapshot)
+     VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+  ).run(id, title, prompt, assignedAgent, createdBy, priority, safeCategory, now, persona, personaSnapshot);
+  const personaSuffix = persona ? ` [persona=${persona}]` : '';
   const summary = assignedAgent
-    ? `Queued '${title}' → ${assignedAgent}`
-    : `Queued '${title}' (unassigned)`;
+    ? `Queued '${title}' → ${assignedAgent}${personaSuffix}`
+    : `Queued '${title}' (unassigned)${personaSuffix}`;
   logToHiveMind(createdBy, ALLOWED_CHAT_ID, 'mission_queued', summary);
 }
 

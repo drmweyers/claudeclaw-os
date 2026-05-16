@@ -132,6 +132,27 @@ export function listPersonaSlugs(): string[] {
 }
 
 /**
+ * Defensive runtime intersection: returns the MCP allowlist that should
+ * actually be passed to runAgent for this persona. Caller is responsible
+ * for ensuring the persona was validated against the agent at queue time;
+ * this re-intersects in case the agent's mcp_servers changed between
+ * queue and dispatch.
+ *
+ * @param personaAllowlist The persona's declared mcp_allowlist.
+ * @param agentAllowlist The agent's current mcp_servers, or undefined (= grants all).
+ * @returns The intersected allowlist. If the agent grants all MCPs, returns
+ *          the persona allowlist unchanged. If the persona has no MCPs, returns [].
+ */
+export function intersectMcpAllowlists(
+  personaAllowlist: string[],
+  agentAllowlist?: string[],
+): string[] {
+  if (personaAllowlist.length === 0) return [];
+  if (agentAllowlist === undefined) return [...personaAllowlist];
+  return personaAllowlist.filter((m) => agentAllowlist.includes(m));
+}
+
+/**
  * Verify a persona is compatible with a specific agent: every entry in
  * the persona's mcp_allowlist must also be in the agent's mcp_servers
  * allowlist. If the agent has no mcp_servers field (= grants all MCPs),

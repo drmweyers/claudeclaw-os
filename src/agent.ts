@@ -181,6 +181,7 @@ export async function runAgent(
   abortController?: AbortController,
   onStreamText?: (accumulatedText: string) => void,
   mcpAllowlist?: string[],
+  appendSystemPrompt?: string,
 ): Promise<AgentResult> {
   // Centralized kill-switch enforcement. Throws KillSwitchDisabledError if
   // LLM_SPAWN_ENABLED has been flipped off — caller is expected to surface
@@ -257,6 +258,12 @@ export async function runAgent(
 
         // Model override (e.g. 'claude-haiku-4-5', 'claude-sonnet-4-5')
         ...(model ? { model } : {}),
+
+        // Persona system-prompt injection (Pantheon). When provided, the SDK
+        // appends this to the system context built from settingSources, so it
+        // operates at SYSTEM role — never concatenated into the user message,
+        // which prevents prompt injection and survives session resumption.
+        ...(appendSystemPrompt ? { appendSystemPrompt } : {}),
 
         // Abort support — signals the SDK to kill the subprocess
         ...(abortController ? { abortController } : {}),
@@ -421,6 +428,7 @@ export async function runAgentWithRetry(
   onRetry?: (attempt: number, error: AgentError) => void,
   fallbackModels?: string[],
   mcpAllowlist?: string[],
+  appendSystemPrompt?: string,
 ): Promise<AgentResult> {
   let lastError: AgentError | undefined;
 
@@ -435,7 +443,7 @@ export async function runAgentWithRetry(
       return await runAgent(
         message, sessionId, onTyping, onProgress,
         currentModel, abortController, onStreamText,
-        mcpAllowlist,
+        mcpAllowlist, appendSystemPrompt,
       );
     } catch (err) {
       if (!(err instanceof AgentError)) throw err;

@@ -13,11 +13,15 @@ import {
   completeMissionTask,
   resetStuckMissionTasks,
   getMissionTask,
+  getPersonaSpend24h,
+  saveTokenUsage,
 } from './db.js';
 import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
+import { intersectMcpAllowlists } from './personas.js';
+import type { Persona } from './personas.js';
 
 type Sender = (text: string) => Promise<void>;
 
@@ -156,7 +160,42 @@ async function runDueMissionTasks(): Promise<void> {
   if (runningTaskIds.has(missionKey)) return;
   runningTaskIds.add(missionKey);
 
-  logger.info({ missionId: mission.id, title: mission.title }, 'Running mission task');
+  // Pantheon: resolve persona from the snapshot stored on the row at queue
+  // time. The snapshot — NOT the YAML file — is the source of truth here;
+  // edits to personas/*.yaml while a mission is in flight do not affect it.
+  let persona: Persona | null = null;
+  if (mission.persona_snapshot) {
+    try {
+      persona = JSON.parse(mission.persona_snapshot) as Persona;
+    } catch (err) {
+      logger.error({ err, missionId: mission.id, persona: mission.persona }, 'Failed to parse persona_snapshot; running without persona');
+    }
+  }
+
+  // Cost-cap gate: if the persona's last-24h spend would breach the cap, refuse
+  // to dispatch the mission. Mark it failed:cost_cap and notify Mark. The check
+  // is conservative (before the call, with current spend) — a single mission
+  // CAN push spend over the cap, but the NEXT mission will be blocked.
+  if (persona) {
+    const spend24h = getPersonaSpend24h(persona.slug);
+    if (spend24h >= persona.dailyCostCapUsd) {
+      const errMsg = `Cost cap exceeded for persona '${persona.slug}': last 24h spend $${spend24h.toFixed(4)} >= cap $${persona.dailyCostCapUsd}`;
+      completeMissionTask(mission.id, null, 'failed', `failed:cost_cap ${errMsg}`);
+      logger.warn({ missionId: mission.id, persona: persona.slug, spend24h, cap: persona.dailyCostCapUsd }, 'Mission rejected: persona cost cap exceeded');
+      try {
+        await sender(`Mission '${mission.title}' rejected: persona '${persona.slug}' has hit its $${persona.dailyCostCapUsd}/day cap (spent $${spend24h.toFixed(2)} in last 24h).`);
+      } catch (sendErr) {
+        logger.warn({ err: sendErr, missionId: mission.id }, 'Failed to send cost-cap notification');
+      }
+      runningTaskIds.delete(missionKey);
+      return;
+    }
+  }
+
+  logger.info(
+    { missionId: mission.id, title: mission.title, persona: persona?.slug, model: persona?.model ?? agentDefaultModel },
+    'Running mission task',
+  );
 
   const chatId = ALLOWED_CHAT_ID || 'mission';
   messageQueue.enqueue(chatId, async () => {
@@ -176,7 +215,21 @@ async function runDueMissionTasks(): Promise<void> {
     }, 5_000);
 
     try {
-      const result = await runAgent(mission.prompt, undefined, () => {}, undefined, agentDefaultModel, abortController, undefined, agentMcpAllowlist);
+      // Persona overrides: model, MCP allowlist (already validated subset at
+      // queue time — intersect again here as defense-in-depth in case
+      // agent.yaml changed between queue and dispatch), and system prompt
+      // (injected as appendSystemPrompt at SYSTEM role, never user-text).
+      const effectiveModel = persona?.model ?? agentDefaultModel;
+      const effectiveMcpAllowlist = persona
+        ? intersectMcpAllowlists(persona.mcpAllowlist, agentMcpAllowlist)
+        : agentMcpAllowlist;
+      const effectiveAppendSystemPrompt = persona?.systemPrompt;
+
+      const result = await runAgent(
+        mission.prompt, undefined, () => {}, undefined,
+        effectiveModel, abortController, undefined,
+        effectiveMcpAllowlist, effectiveAppendSystemPrompt,
+      );
       clearTimeout(timeout);
       clearInterval(cancelPoll);
 
@@ -196,9 +249,37 @@ async function runDueMissionTasks(): Promise<void> {
           }
         }
       } else {
-        const text = result.text?.trim() || 'Task completed with no output.';
+        const baseText = result.text?.trim() || 'Task completed with no output.';
+
+        // Pantheon: record persona+model on token_usage row so cost caps and
+        // verifiability work. Skip if no usage info was emitted by the SDK.
+        const costUsd = result.usage?.totalCostUsd ?? 0;
+        if (result.usage) {
+          saveTokenUsage(
+            chatId,
+            result.newSessionId,
+            result.usage.inputTokens,
+            result.usage.outputTokens,
+            result.usage.cacheReadInputTokens,
+            0, // contextTokens — not tracked per-mission today
+            costUsd,
+            result.usage.didCompact,
+            schedulerAgentId,
+            persona?.slug ?? null,
+            effectiveModel ?? null,
+          );
+        }
+
+        // Pantheon: append a footer so Mark sees which persona+model ran and
+        // what it cost. Only shown when a persona is active — non-persona
+        // missions keep their existing UX. Italic markdown so it visually
+        // separates from the answer.
+        const footer = persona
+          ? `\n\n_via ${persona.slug} · ${effectiveModel} · $${costUsd.toFixed(4)}_`
+          : '';
+        const text = baseText + footer;
         completeMissionTask(mission.id, text, 'completed');
-        logger.info({ missionId: mission.id }, 'Mission task completed');
+        logger.info({ missionId: mission.id, persona: persona?.slug, costUsd }, 'Mission task completed');
 
         // Send result to Telegram
         for (const chunk of splitMessage(formatForTelegram(text))) {

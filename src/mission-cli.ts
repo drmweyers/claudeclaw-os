@@ -21,6 +21,7 @@ import {
   getMissionTask,
   cancelMissionTask,
 } from './db.js';
+import { loadPersona, validatePersonaForAgent } from './personas.js';
 
 initDatabase();
 
@@ -48,12 +49,18 @@ const priorityArg = priorityFlagIdx !== -1
   ? parseInt(process.argv[priorityFlagIdx + 1] ?? '0', 10)
   : 5;
 
+// Parse --persona flag (Pantheon)
+const personaFlagIdx = process.argv.indexOf('--persona');
+const personaArg = personaFlagIdx !== -1
+  ? process.argv[personaFlagIdx + 1] ?? null
+  : null;
+
 // Who created this task
 const createdBy = process.env.CLAUDECLAW_AGENT_ID ?? 'main';
 
 // Clean argv: remove all flag pairs
 const flagIndices = new Set<number>();
-[agentFlagIdx, titleFlagIdx, statusFlagIdx, priorityFlagIdx].forEach(idx => {
+[agentFlagIdx, titleFlagIdx, statusFlagIdx, priorityFlagIdx, personaFlagIdx].forEach(idx => {
   if (idx !== -1) { flagIndices.add(idx); flagIndices.add(idx + 1); }
 });
 const cleanedArgv = process.argv.filter((_, i) => !flagIndices.has(i));
@@ -71,16 +78,43 @@ switch (command) {
   case 'create': {
     const prompt = rest[0];
     if (!prompt) {
-      console.error('Usage: mission-cli create --agent <id> --title "Label" "Full prompt text"');
+      console.error('Usage: mission-cli create --agent <id> --title "Label" [--persona <slug>] "Full prompt text"');
       process.exit(1);
     }
     const title = titleArg || prompt.slice(0, 60);
     const id = randomBytes(4).toString('hex');
-    createMissionTask(id, title, prompt, targetAgent ?? null, createdBy, priorityArg);
+
+    // Pantheon: if --persona was set, validate and snapshot the persona now.
+    // The snapshot becomes the scheduler's source of truth — file edits while
+    // the mission is in flight will NOT affect that mission. Validation is
+    // intentionally fail-loud at queue time (typos / missing files / MCP
+    // mismatch all exit 1) instead of failing silently at pickup.
+    let personaSnapshot: string | null = null;
+    if (personaArg) {
+      if (!targetAgent) {
+        console.error(`Error: --persona requires --agent (persona MCP allowlist must be validated against the assigned agent).`);
+        process.exit(1);
+      }
+      try {
+        const persona = loadPersona(personaArg);
+        validatePersonaForAgent(persona, targetAgent);
+        personaSnapshot = JSON.stringify(persona);
+      } catch (err) {
+        console.error(`Persona validation failed: ${(err as Error).message}`);
+        process.exit(1);
+      }
+    }
+
+    createMissionTask(
+      id, title, prompt, targetAgent ?? null, createdBy, priorityArg,
+      null, // category
+      personaArg, personaSnapshot,
+    );
 
     console.log(`Mission task created: ${id}`);
     console.log(`  Title:    ${title}`);
     console.log(`  Agent:    ${targetAgent || 'unassigned (use dashboard to assign)'}`);
+    if (personaArg) console.log(`  Persona:  ${personaArg}`);
     console.log(`  Priority: ${priorityArg}`);
     console.log(`  Prompt:   ${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}`);
     break;
