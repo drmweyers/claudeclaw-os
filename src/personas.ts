@@ -155,6 +155,87 @@ export function intersectMcpAllowlists(
   return personaAllowlist.filter((m) => agentAllowlist.includes(m));
 }
 
+export interface DispatchParams {
+  /** Model passed to runAgent. Falls back to agent default when no persona. */
+  model: string | undefined;
+  /** MCP allowlist passed to runAgent (already intersected for persona case). */
+  mcpAllowlist: string[] | undefined;
+  /** System prompt appended via SDK option (NOT user-text). Undefined when no persona. */
+  appendSystemPrompt: string | undefined;
+}
+
+/**
+ * Compute the dispatch parameters for runAgent given an optional persona.
+ * When persona is null, returns the agent defaults verbatim — making this
+ * function safe to call on every mission, persona or not.
+ *
+ * Pure function: no I/O, no DB, no side effects. Test target for the
+ * persona-meets-scheduler integration logic.
+ */
+export function resolveDispatchParams(
+  persona: Persona | null,
+  agentDefaultModel: string | undefined,
+  agentMcpAllowlist: string[] | undefined,
+): DispatchParams {
+  if (!persona) {
+    return {
+      model: agentDefaultModel,
+      mcpAllowlist: agentMcpAllowlist,
+      appendSystemPrompt: undefined,
+    };
+  }
+  return {
+    model: persona.model,
+    mcpAllowlist: intersectMcpAllowlists(persona.mcpAllowlist, agentMcpAllowlist),
+    appendSystemPrompt: persona.systemPrompt,
+  };
+}
+
+/**
+ * Render the persona footer for a Telegram reply.
+ * Returns an empty string when persona is null so callers can unconditionally
+ * concatenate without branching.
+ */
+export function formatPersonaFooter(
+  persona: Persona | null,
+  model: string | undefined,
+  costUsd: number,
+): string {
+  if (!persona) return '';
+  return `\n\n_via ${persona.slug} · ${model ?? 'unknown'} · $${costUsd.toFixed(4)}_`;
+}
+
+/**
+ * Parse a persona snapshot JSON string into a Persona object.
+ * Returns null on parse failure or null input. Logs nothing — caller is
+ * expected to handle the null case.
+ */
+export function parsePersonaSnapshot(snapshot: string | null): Persona | null {
+  if (!snapshot) return null;
+  try {
+    return JSON.parse(snapshot) as Persona;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cost-cap pre-check decision. Pure given the spend value — caller is
+ * responsible for fetching current 24h spend from token_usage.
+ */
+export function shouldDispatchUnderCap(
+  persona: Persona,
+  currentSpend24h: number,
+): { allowed: true } | { allowed: false; reason: string } {
+  if (currentSpend24h >= persona.dailyCostCapUsd) {
+    return {
+      allowed: false,
+      reason: `Cost cap exceeded for persona '${persona.slug}': last 24h spend $${currentSpend24h.toFixed(4)} >= cap $${persona.dailyCostCapUsd}`,
+    };
+  }
+  return { allowed: true };
+}
+
 /**
  * Verify a persona is compatible with a specific agent: every entry in
  * the persona's mcp_allowlist must also be in the agent's mcp_servers

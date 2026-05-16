@@ -22,7 +22,13 @@ import {
   loadPersona,
   listPersonaSlugs,
   validatePersonaForAgent,
+  resolveDispatchParams,
+  formatPersonaFooter,
+  parsePersonaSnapshot,
+  shouldDispatchUnderCap,
+  intersectMcpAllowlists,
   ALLOWED_MODELS,
+  type Persona,
 } from './personas.js';
 import * as config from './config.js';
 
@@ -205,5 +211,146 @@ describe('ALLOWED_MODELS', () => {
     expect(ALLOWED_MODELS).toContain('claude-opus-4-7');
     expect(ALLOWED_MODELS).toContain('claude-sonnet-4-6');
     expect(ALLOWED_MODELS).toContain('claude-haiku-4-5');
+  });
+});
+
+// ── Pure scheduler helpers (exercised via personas.ts so they're trivially
+//     testable without mocking the entire scheduler. The scheduler's
+//     runDueMissionTasks delegates to these for all persona-aware behavior,
+//     so coverage here covers the orchestration logic too.) ──────────────
+
+const SAMPLE_PERSONA: Persona = {
+  slug: 'quick-check',
+  name: 'Quick Check',
+  description: 'Fast triage',
+  model: 'claude-haiku-4-5',
+  systemPrompt: 'You are operating in quick mode.',
+  mcpAllowlist: [],
+  dailyCostCapUsd: 2.0,
+  maxTurns: 5,
+};
+
+describe('resolveDispatchParams', () => {
+  it('returns agent defaults when persona is null', () => {
+    const p = resolveDispatchParams(null, 'claude-sonnet-4-6', ['obsidian']);
+    expect(p.model).toBe('claude-sonnet-4-6');
+    expect(p.mcpAllowlist).toEqual(['obsidian']);
+    expect(p.appendSystemPrompt).toBeUndefined();
+  });
+
+  it('returns persona model + system_prompt when persona is set', () => {
+    const p = resolveDispatchParams(SAMPLE_PERSONA, 'claude-sonnet-4-6', undefined);
+    expect(p.model).toBe('claude-haiku-4-5');
+    expect(p.appendSystemPrompt).toBe('You are operating in quick mode.');
+  });
+
+  it('intersects persona MCP allowlist with agent allowlist', () => {
+    const persona = { ...SAMPLE_PERSONA, mcpAllowlist: ['obsidian', 'web'] };
+    const p = resolveDispatchParams(persona, undefined, ['obsidian', 'supabase']);
+    expect(p.mcpAllowlist).toEqual(['obsidian']); // 'web' filtered out
+  });
+
+  it('empty persona MCP allowlist => empty effective allowlist (no MCPs)', () => {
+    const p = resolveDispatchParams(SAMPLE_PERSONA, undefined, ['obsidian', 'supabase']);
+    expect(p.mcpAllowlist).toEqual([]);
+  });
+
+  it('persona allowlist + undefined agent allowlist (= grants all) keeps persona list', () => {
+    const persona = { ...SAMPLE_PERSONA, mcpAllowlist: ['obsidian', 'web'] };
+    const p = resolveDispatchParams(persona, undefined, undefined);
+    expect(p.mcpAllowlist).toEqual(['obsidian', 'web']);
+  });
+});
+
+describe('intersectMcpAllowlists', () => {
+  it('returns empty array when persona has no MCPs', () => {
+    expect(intersectMcpAllowlists([], ['obsidian'])).toEqual([]);
+    expect(intersectMcpAllowlists([], undefined)).toEqual([]);
+  });
+
+  it('returns copy of persona list when agent grants all (undefined)', () => {
+    const persona = ['obsidian', 'web'];
+    const result = intersectMcpAllowlists(persona, undefined);
+    expect(result).toEqual(persona);
+    expect(result).not.toBe(persona); // returns a copy, not the input array
+  });
+
+  it('intersects when agent has explicit allowlist', () => {
+    expect(intersectMcpAllowlists(['obsidian', 'web'], ['obsidian'])).toEqual(['obsidian']);
+    expect(intersectMcpAllowlists(['obsidian', 'web'], [])).toEqual([]);
+    expect(intersectMcpAllowlists(['obsidian'], ['supabase'])).toEqual([]);
+  });
+});
+
+describe('formatPersonaFooter', () => {
+  it('returns empty string when persona is null', () => {
+    expect(formatPersonaFooter(null, 'claude-sonnet-4-6', 0.01)).toBe('');
+  });
+
+  it('renders persona slug + model + 4-decimal cost when persona is set', () => {
+    expect(formatPersonaFooter(SAMPLE_PERSONA, 'claude-haiku-4-5', 0.003)).toBe(
+      '\n\n_via quick-check · claude-haiku-4-5 · $0.0030_',
+    );
+  });
+
+  it('falls back to "unknown" model when model is undefined', () => {
+    expect(formatPersonaFooter(SAMPLE_PERSONA, undefined, 0.01)).toContain('· unknown ·');
+  });
+
+  it('pads zero cost as $0.0000 (not "0")', () => {
+    expect(formatPersonaFooter(SAMPLE_PERSONA, 'claude-haiku-4-5', 0)).toContain('$0.0000');
+  });
+});
+
+describe('parsePersonaSnapshot', () => {
+  it('returns null when input is null', () => {
+    expect(parsePersonaSnapshot(null)).toBeNull();
+  });
+
+  it('returns null when input is empty string', () => {
+    expect(parsePersonaSnapshot('')).toBeNull();
+  });
+
+  it('returns null on malformed JSON instead of throwing', () => {
+    expect(parsePersonaSnapshot('{not json')).toBeNull();
+  });
+
+  it('round-trips a Persona via JSON.stringify + parsePersonaSnapshot', () => {
+    const json = JSON.stringify(SAMPLE_PERSONA);
+    const parsed = parsePersonaSnapshot(json);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.slug).toBe('quick-check');
+    expect(parsed!.model).toBe('claude-haiku-4-5');
+    expect(parsed!.dailyCostCapUsd).toBe(2.0);
+  });
+});
+
+describe('shouldDispatchUnderCap', () => {
+  it('allows dispatch when spend is under the cap', () => {
+    const decision = shouldDispatchUnderCap(SAMPLE_PERSONA, 1.5);
+    expect(decision.allowed).toBe(true);
+  });
+
+  it('allows dispatch at zero spend', () => {
+    const decision = shouldDispatchUnderCap(SAMPLE_PERSONA, 0);
+    expect(decision.allowed).toBe(true);
+  });
+
+  it('rejects dispatch when spend exactly equals the cap', () => {
+    const decision = shouldDispatchUnderCap(SAMPLE_PERSONA, 2.0);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.reason).toMatch(/Cost cap exceeded/);
+      expect(decision.reason).toMatch(/quick-check/);
+    }
+  });
+
+  it('rejects dispatch when spend exceeds the cap', () => {
+    const decision = shouldDispatchUnderCap(SAMPLE_PERSONA, 2.5);
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) {
+      expect(decision.reason).toMatch(/\$2\.5000/); // current spend, 4 decimals
+      expect(decision.reason).toMatch(/\$2/); // cap
+    }
   });
 });

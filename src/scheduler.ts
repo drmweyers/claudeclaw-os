@@ -20,8 +20,12 @@ import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
-import { intersectMcpAllowlists } from './personas.js';
-import type { Persona } from './personas.js';
+import {
+  parsePersonaSnapshot,
+  shouldDispatchUnderCap,
+  resolveDispatchParams,
+  formatPersonaFooter,
+} from './personas.js';
 
 type Sender = (text: string) => Promise<void>;
 
@@ -163,13 +167,9 @@ async function runDueMissionTasks(): Promise<void> {
   // Pantheon: resolve persona from the snapshot stored on the row at queue
   // time. The snapshot — NOT the YAML file — is the source of truth here;
   // edits to personas/*.yaml while a mission is in flight do not affect it.
-  let persona: Persona | null = null;
-  if (mission.persona_snapshot) {
-    try {
-      persona = JSON.parse(mission.persona_snapshot) as Persona;
-    } catch (err) {
-      logger.error({ err, missionId: mission.id, persona: mission.persona }, 'Failed to parse persona_snapshot; running without persona');
-    }
+  const persona = parsePersonaSnapshot(mission.persona_snapshot);
+  if (mission.persona_snapshot && !persona) {
+    logger.error({ missionId: mission.id, persona: mission.persona }, 'Failed to parse persona_snapshot; running without persona');
   }
 
   // Cost-cap gate: if the persona's last-24h spend would breach the cap, refuse
@@ -185,9 +185,9 @@ async function runDueMissionTasks(): Promise<void> {
   // upgrade this to a SQLite BEGIN IMMEDIATE check-and-reserve.
   if (persona) {
     const spend24h = getPersonaSpend24h(persona.slug);
-    if (spend24h >= persona.dailyCostCapUsd) {
-      const errMsg = `Cost cap exceeded for persona '${persona.slug}': last 24h spend $${spend24h.toFixed(4)} >= cap $${persona.dailyCostCapUsd}`;
-      completeMissionTask(mission.id, null, 'failed', `failed:cost_cap ${errMsg}`);
+    const decision = shouldDispatchUnderCap(persona, spend24h);
+    if (!decision.allowed) {
+      completeMissionTask(mission.id, null, 'failed', `failed:cost_cap ${decision.reason}`);
       logger.warn({ missionId: mission.id, persona: persona.slug, spend24h, cap: persona.dailyCostCapUsd }, 'Mission rejected: persona cost cap exceeded');
       try {
         await sender(`Mission '${mission.title}' rejected: persona '${persona.slug}' has hit its $${persona.dailyCostCapUsd}/day cap (spent $${spend24h.toFixed(2)} in last 24h).`);
@@ -222,20 +222,17 @@ async function runDueMissionTasks(): Promise<void> {
     }, 5_000);
 
     try {
-      // Persona overrides: model, MCP allowlist (already validated subset at
-      // queue time — intersect again here as defense-in-depth in case
-      // agent.yaml changed between queue and dispatch), and system prompt
-      // (injected as appendSystemPrompt at SYSTEM role, never user-text).
-      const effectiveModel = persona?.model ?? agentDefaultModel;
-      const effectiveMcpAllowlist = persona
-        ? intersectMcpAllowlists(persona.mcpAllowlist, agentMcpAllowlist)
-        : agentMcpAllowlist;
-      const effectiveAppendSystemPrompt = persona?.systemPrompt;
+      // Persona overrides via the pure resolveDispatchParams helper. Centralises
+      // the agent-default-vs-persona-override fallback logic and is the same code
+      // path the unit tests in personas.test.ts cover. Defense-in-depth: MCP
+      // allowlist re-intersected against agent.mcp_servers in case agent.yaml
+      // changed between queue and dispatch.
+      const dispatch = resolveDispatchParams(persona, agentDefaultModel, agentMcpAllowlist);
 
       const result = await runAgent(
         mission.prompt, undefined, () => {}, undefined,
-        effectiveModel, abortController, undefined,
-        effectiveMcpAllowlist, effectiveAppendSystemPrompt,
+        dispatch.model, abortController, undefined,
+        dispatch.mcpAllowlist, dispatch.appendSystemPrompt,
       );
       clearTimeout(timeout);
       clearInterval(cancelPoll);
@@ -273,18 +270,15 @@ async function runDueMissionTasks(): Promise<void> {
             result.usage.didCompact,
             schedulerAgentId,
             persona?.slug ?? null,
-            effectiveModel ?? null,
+            dispatch.model ?? null,
           );
         }
 
         // Pantheon: append a footer so Mark sees which persona+model ran and
-        // what it cost. Only shown when a persona is active — non-persona
-        // missions keep their existing UX. Italic markdown so it visually
-        // separates from the answer.
-        const footer = persona
-          ? `\n\n_via ${persona.slug} · ${effectiveModel} · $${costUsd.toFixed(4)}_`
-          : '';
-        const text = baseText + footer;
+        // what it cost. Empty string when persona is null, so non-persona
+        // missions keep their existing UX. Italic markdown separates it from
+        // the answer body.
+        const text = baseText + formatPersonaFooter(persona, dispatch.model, costUsd);
         completeMissionTask(mission.id, text, 'completed');
         logger.info({ missionId: mission.id, persona: persona?.slug, costUsd }, 'Mission task completed');
 
