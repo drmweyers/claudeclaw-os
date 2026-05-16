@@ -103,6 +103,11 @@ describe('loadPersona — validation', () => {
     expect(() => loadPersona('bad')).toThrow(/system_prompt.*4096|4096.*system_prompt/i);
   });
 
+  it('rejects empty system_prompt (silent missing-field catches typos)', () => {
+    writePersona('bad', yamlWith('bad', (b) => b.replace('system_prompt: |\n  You are operating in quick mode.\n', 'system_prompt: ""\n')));
+    expect(() => loadPersona('bad')).toThrow(/system_prompt.*required.*non-empty/i);
+  });
+
   it('rejects slug not matching /^[a-z0-9-]+$/', () => {
     // Can't write a file with an invalid slug name via the helper, but we can
     // simulate by writing a file whose body has an invalid slug. loadPersona
@@ -177,7 +182,9 @@ describe('validatePersonaForAgent', () => {
   it('throws when persona declares an MCP the agent does not grant', () => {
     writePersona('p-two', yamlWith('p-two', (b) => b.replace('mcp_allowlist: []', 'mcp_allowlist:\n  - web')));
     const p = loadPersona('p-two');
-    expect(() => validatePersonaForAgent(p, 'research')).toThrow(/web|allowlist|not.*grant/i);
+    // Tighter regex per quality review — must match the actual error shape,
+    // not just any common word that could appear from a swallowed unrelated error.
+    expect(() => validatePersonaForAgent(p, 'research')).toThrow(/requires MCP servers \[web\]/);
   });
 
   it('passes when agent has no mcp_servers field (= grants all MCPs)', () => {

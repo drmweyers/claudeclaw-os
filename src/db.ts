@@ -170,11 +170,16 @@ function createSchema(database: Database.Database): void {
       context_tokens  INTEGER NOT NULL DEFAULT 0,
       cost_usd        REAL NOT NULL DEFAULT 0,
       did_compact     INTEGER NOT NULL DEFAULT 0,
-      created_at      INTEGER NOT NULL
+      created_at      INTEGER NOT NULL,
+      persona         TEXT,
+      model           TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage(session_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_token_usage_chat ON token_usage(chat_id, created_at DESC);
+    -- Pantheon: index supports getPersonaSpend24h (WHERE persona = ? AND created_at >= ?)
+    -- which runs on every mission dispatch as the cost-cap pre-check.
+    CREATE INDEX IF NOT EXISTS idx_token_usage_persona ON token_usage(persona, created_at);
 
     CREATE TABLE IF NOT EXISTS slack_messages (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,19 +234,21 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_inter_agent_tasks_status ON inter_agent_tasks(status, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS mission_tasks (
-      id              TEXT PRIMARY KEY,
-      title           TEXT NOT NULL,
-      prompt          TEXT NOT NULL,
-      assigned_agent  TEXT,
-      status          TEXT NOT NULL DEFAULT 'queued',
-      result          TEXT,
-      error           TEXT,
-      created_by      TEXT NOT NULL DEFAULT 'dashboard',
-      priority        INTEGER NOT NULL DEFAULT 0,
-      category        TEXT,
-      created_at      INTEGER NOT NULL,
-      started_at      INTEGER,
-      completed_at    INTEGER
+      id                TEXT PRIMARY KEY,
+      title             TEXT NOT NULL,
+      prompt            TEXT NOT NULL,
+      assigned_agent    TEXT,
+      status            TEXT NOT NULL DEFAULT 'queued',
+      result            TEXT,
+      error             TEXT,
+      created_by        TEXT NOT NULL DEFAULT 'dashboard',
+      priority          INTEGER NOT NULL DEFAULT 0,
+      category          TEXT,
+      created_at        INTEGER NOT NULL,
+      started_at        INTEGER,
+      completed_at      INTEGER,
+      persona           TEXT,
+      persona_snapshot  TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_mission_status
@@ -762,6 +769,9 @@ function runMigrations(database: Database.Database): void {
   // cost-cap checks and verifiability of "did Haiku really run" are possible.
   addColumnIfMissing(database, 'token_usage', 'persona', `TEXT`);
   addColumnIfMissing(database, 'token_usage', 'model', `TEXT`);
+  // Index for getPersonaSpend24h on databases created before this column existed.
+  // No-op if it already exists (CREATE INDEX IF NOT EXISTS).
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_token_usage_persona ON token_usage(persona, created_at)`);
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */

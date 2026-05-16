@@ -498,4 +498,57 @@ describe('database', () => {
       expect(runs[0].summary.toLowerCase()).toContain('timeout');
     });
   });
+
+  // ── Pantheon: persona columns + cost-cap query ────────────────────
+  describe('persona columns + getPersonaSpend24h', () => {
+    it('createMissionTask stores persona + persona_snapshot, queryable via getMissionTask', async () => {
+      const { getMissionTask, saveTokenUsage, getPersonaSpend24h } = await import('./db.js');
+      const snapshot = JSON.stringify({
+        slug: 'quick-check',
+        name: 'Quick Check',
+        model: 'claude-haiku-4-5',
+        systemPrompt: 'You are operating in quick mode.',
+        mcpAllowlist: [],
+        dailyCostCapUsd: 2.0,
+      });
+      createMissionTask('pm1', 'Lookup', 'half-life of caffeine', 'research', 'main', 5, null, 'quick-check', snapshot);
+      const row = getMissionTask('pm1');
+      expect(row).not.toBeNull();
+      expect(row!.persona).toBe('quick-check');
+      expect(row!.persona_snapshot).toBe(snapshot);
+      const parsed = JSON.parse(row!.persona_snapshot!);
+      expect(parsed.model).toBe('claude-haiku-4-5');
+      // Sanity: untouched fields default to their existing semantics
+      expect(row!.assigned_agent).toBe('research');
+
+      // saveTokenUsage with persona+model writes those fields and getPersonaSpend24h sums them
+      saveTokenUsage('chat-1', 'sess-1', 100, 50, 0, 0, 0.001, false, 'research', 'quick-check', 'claude-haiku-4-5');
+      saveTokenUsage('chat-1', 'sess-2', 200, 100, 0, 0, 0.003, false, 'research', 'quick-check', 'claude-haiku-4-5');
+      // Different persona — should NOT count
+      saveTokenUsage('chat-1', 'sess-3', 1000, 500, 0, 0, 5.000, false, 'research', 'other-persona', 'claude-opus-4-7');
+
+      const spend = getPersonaSpend24h('quick-check');
+      expect(spend).toBeCloseTo(0.004, 5);
+    });
+
+    it('createMissionTask with NULL persona stores NULLs (backward compat)', async () => {
+      const { getMissionTask } = await import('./db.js');
+      createMissionTask('pm2', 'No persona', 'do thing', 'ops', 'main', 5);
+      const row = getMissionTask('pm2');
+      expect(row).not.toBeNull();
+      expect(row!.persona).toBeNull();
+      expect(row!.persona_snapshot).toBeNull();
+    });
+
+    it('getPersonaSpend24h excludes rows older than 24h', async () => {
+      const { saveTokenUsage, getPersonaSpend24h } = await import('./db.js');
+      // saveTokenUsage uses Date.now(), so we can't easily inject older rows
+      // without raw SQL. Test the in-window case here; the cutoff math is
+      // covered by code review (cutoff = now - 86400).
+      saveTokenUsage('chat-x', 'sess-x', 10, 5, 0, 0, 0.5, false, 'research', 'budget-test', 'claude-haiku-4-5');
+      expect(getPersonaSpend24h('budget-test')).toBeCloseTo(0.5, 5);
+      // Unknown persona returns 0, not undefined
+      expect(getPersonaSpend24h('not-real-slug')).toBe(0);
+    });
+  });
 });

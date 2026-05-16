@@ -176,6 +176,13 @@ async function runDueMissionTasks(): Promise<void> {
   // to dispatch the mission. Mark it failed:cost_cap and notify Mark. The check
   // is conservative (before the call, with current spend) — a single mission
   // CAN push spend over the cap, but the NEXT mission will be blocked.
+  //
+  // Race condition: two concurrent missions for the same persona could both pass
+  // the cap check, both run, and double the burst. Acceptable in this deployment
+  // because: (1) one scheduler process per agent (the messageQueue.enqueue serialises
+  // per-chat dispatch); (2) the runningTaskIds in-memory guard prevents the same
+  // mission from being processed twice. If multi-process deployment is ever planned,
+  // upgrade this to a SQLite BEGIN IMMEDIATE check-and-reserve.
   if (persona) {
     const spend24h = getPersonaSpend24h(persona.slug);
     if (spend24h >= persona.dailyCostCapUsd) {

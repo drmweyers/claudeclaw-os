@@ -78,6 +78,9 @@ export function loadPersona(slug: string): Persona {
   }
 
   const systemPrompt = String(raw['system_prompt'] ?? '');
+  if (systemPrompt.trim().length === 0) {
+    throw new Error(`Persona ${file}: system_prompt is required and must be non-empty`);
+  }
   const promptBytes = Buffer.byteLength(systemPrompt, 'utf-8');
   if (promptBytes > MAX_SYSTEM_PROMPT_BYTES) {
     throw new Error(
