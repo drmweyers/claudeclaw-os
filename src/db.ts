@@ -2140,6 +2140,31 @@ export function getSessionConversation(sessionId: string, limit = 40): Conversat
     .all(sessionId, limit) as ConversationTurn[];
 }
 
+/**
+ * Sum of agent's token-usage rows whose created_at falls within the given UTC date.
+ * Used by the Channel 4 bridge to emit a daily_total spend_marker once per day.
+ * Returns zeros if no rows exist for that date.
+ */
+export function getAgentDailyTokenTotals(agentId: string, utcDate: string): { totalCostUsd: number; totalTokens: number; callCount: number } {
+  const startEpoch = Math.floor(Date.UTC(
+    parseInt(utcDate.slice(0, 4), 10),
+    parseInt(utcDate.slice(5, 7), 10) - 1,
+    parseInt(utcDate.slice(8, 10), 10),
+  ) / 1000);
+  const endEpoch = startEpoch + 86400;
+  const row = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(cost_usd), 0)                              as totalCostUsd,
+         COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) as totalTokens,
+         COUNT(*)                                                as callCount
+       FROM token_usage
+       WHERE agent_id = ? AND created_at >= ? AND created_at < ?`,
+    )
+    .get(agentId, startEpoch, endEpoch) as { totalCostUsd: number; totalTokens: number; callCount: number };
+  return row;
+}
+
 export function getAgentTokenStats(agentId: string): { todayCost: number; todayTurns: number; allTimeCost: number } {
   const today = db
     .prepare(

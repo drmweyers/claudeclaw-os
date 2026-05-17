@@ -31,6 +31,7 @@ import {
   PROJECT_ROOT,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
+import { maybeEmitSpendMarker, emitSessionEnd } from './bridge.js';
 import { logger } from './logger.js';
 import { downloadMedia, buildPhotoMessage, buildDocumentMessage, buildVideoMessage } from './media.js';
 import { buildMemoryContext, evaluateMemoryRelevance, saveConversationTurn, shouldNudgeMemory, MEMORY_NUDGE_TEXT } from './memory.js';
@@ -738,6 +739,14 @@ async function handleMessage(ctx: Context, message: string, forceVoiceReply = fa
         logger.error({ err: dbErr }, 'Failed to save token usage');
       }
 
+      maybeEmitSpendMarker({
+        agentId: AGENT_ID,
+        sessionId: activeSessionId,
+        costUsd: result.usage.totalCostUsd,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      });
+
       // Track usage for rate limiting
       trackUsage(result.usage.inputTokens + result.usage.outputTokens, result.usage.totalCostUsd);
 
@@ -968,6 +977,16 @@ export function createBot(): Bot {
           if (summary && summary.length > 0) {
             logToHiveMind(AGENT_ID, chatIdStr, 'session_end', summary.slice(0, 300));
             logger.info({ agentId: AGENT_ID, summary }, 'Hive mind auto-commit (LLM summary)');
+
+            // Channel 4 bridge — emit session_summary / decision_record.
+            emitSessionEnd({
+              agentId: AGENT_ID,
+              sessionId: sessionToSummarize,
+              summary: summary.slice(0, 300),
+              turnCount: turns.length,
+              totalTokens: result.usage?.inputTokens ?? 0,
+              totalCostUsd: result.usage?.totalCostUsd,
+            });
           }
         } catch (err) {
           // Fallback: log a basic summary from conversation turns
@@ -975,7 +994,15 @@ export function createBot(): Bot {
             const turns = getSessionConversation(sessionToSummarize, 40);
             if (turns.length >= 2) {
               const firstUserMsg = turns.find(t => t.role === 'user')?.content?.slice(0, 100) || 'unknown';
-              logToHiveMind(AGENT_ID, chatIdStr, 'session_end', `${turns.length} turns starting with: ${firstUserMsg}`);
+              const fallbackSummary = `${turns.length} turns starting with: ${firstUserMsg}`;
+              logToHiveMind(AGENT_ID, chatIdStr, 'session_end', fallbackSummary);
+              emitSessionEnd({
+                agentId: AGENT_ID,
+                sessionId: sessionToSummarize,
+                summary: fallbackSummary,
+                turnCount: turns.length,
+                totalTokens: 0,
+              });
             }
           } catch { /* give up */ }
           logger.error({ err }, 'Hive mind LLM summary failed, used fallback');
@@ -1760,6 +1787,14 @@ async function processDashboardMessage(
       } catch (dbErr) {
         logger.error({ err: dbErr }, 'Failed to save token usage');
       }
+
+      maybeEmitSpendMarker({
+        agentId: AGENT_ID,
+        sessionId: activeSessionId,
+        costUsd: result.usage.totalCostUsd,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      });
     }
   } catch (err) {
     setActiveAbort(chatIdStr, null);

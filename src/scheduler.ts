@@ -15,8 +15,10 @@ import {
   getMissionTask,
   getPersonaSpend24h,
   saveTokenUsage,
+  getAgentDailyTokenTotals,
 } from './db.js';
 import { logger } from './logger.js';
+import { maybeEmitSpendMarker, emitDailyTotal } from './bridge.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
@@ -67,7 +69,41 @@ export function initScheduler(send: Sender, agentId = 'main'): void {
   logger.info({ agentId }, 'Scheduler started (checking every 60s)');
 }
 
+// Channel 4 bridge — once-per-UTC-day daily_total spend_marker.
+// We piggyback on the 60s scheduler tick instead of adding a separate cron.
+// Tracks the date for which we've already emitted; on a rollover, emits
+// yesterday's total for this agent.
+let lastDailyEmitYmd: string | null = null;
+function maybeFireDailyTotal(): void {
+  const todayYmd = new Date().toISOString().slice(0, 10);
+  // First tick after process start — record today and wait for rollover.
+  // This avoids re-emitting yesterday's total if the process restarts mid-day.
+  if (lastDailyEmitYmd === null) {
+    lastDailyEmitYmd = todayYmd;
+    return;
+  }
+  if (lastDailyEmitYmd === todayYmd) return;
+  // Rollover detected — emit totals for the day we just left (lastDailyEmitYmd).
+  const yesterday = lastDailyEmitYmd;
+  lastDailyEmitYmd = todayYmd;
+  try {
+    const totals = getAgentDailyTokenTotals(schedulerAgentId, yesterday);
+    if (totals.callCount > 0) {
+      emitDailyTotal({
+        agentId: schedulerAgentId,
+        date: yesterday,
+        totalCostUsd: totals.totalCostUsd,
+        totalTokens: totals.totalTokens,
+        callCount: totals.callCount,
+      });
+    }
+  } catch (err) {
+    logger.warn({ err, yesterday, agentId: schedulerAgentId }, 'Bridge daily-total emit failed');
+  }
+}
+
 async function runDueTasks(): Promise<void> {
+  maybeFireDailyTotal();
   const tasks = getDueTasks(schedulerAgentId);
 
   if (tasks.length > 0) {
@@ -272,6 +308,15 @@ async function runDueMissionTasks(): Promise<void> {
             persona?.slug ?? null,
             dispatch.model ?? null,
           );
+          maybeEmitSpendMarker({
+            agentId: schedulerAgentId,
+            sessionId: result.newSessionId,
+            costUsd,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            model: dispatch.model ?? undefined,
+            persona: persona?.slug ?? null,
+          });
         }
 
         // Pantheon: append a footer so Mark sees which persona+model ran and

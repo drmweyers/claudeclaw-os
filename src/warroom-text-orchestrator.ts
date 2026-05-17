@@ -45,6 +45,7 @@ import {
   getDashboardSetting,
   logToHiveMind,
 } from './db.js';
+import { maybeEmitSpendMarker } from './bridge.js';
 import { buildMemoryContext } from './memory.js';
 import { ingestConversationTurn } from './memory-ingest.js';
 import {
@@ -1732,6 +1733,13 @@ async function runAgentTurn(args: RunAgentTurnArgs): Promise<string> {
               false,
               agentId,
             );
+            maybeEmitSpendMarker({
+              agentId,
+              sessionId: undefined,
+              costUsd: totalCost ?? 0,
+              inputTokens,
+              outputTokens,
+            });
           }
         } catch (err) {
           logger.warn(
