@@ -120,3 +120,17 @@ agents/*/agent.yaml.backup
 # CWDs (sub-agents start with cwd=agents/<id>).
 .claude/claudex/
 agents/*/.claude/claudex/
+
+# Local Claude Code per-user state
+.claude/settings.local.json
+.claude/worktrees/
+
+# Playwright local cache + screenshots
+.playwright-cli/
+screenshots/
+
+# Scratch tmp + loose root artifacts
+/tmp/
+/*.png
+/download.html
+/UsersdrmweClaudeclaudeclaw-os*

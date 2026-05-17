@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BCI Innovation Labs — Data Map</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#0f1117; color:#e2e8f0; padding:24px; }
+  h1 { font-size:24px; margin-bottom:4px; color:#fff; }
+  .subtitle { color:#6b7280; font-size:14px; margin-bottom:24px; }
+  .tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:1px solid #2d3748; padding-bottom:8px; }
+  .tab { padding:8px 16px; border-radius:6px 6px 0 0; cursor:pointer; font-size:13px; font-weight:500; color:#9ca3af; background:transparent; border:none; }
+  .tab.active { background:#1e293b; color:#60a5fa; }
+  .tab:hover { color:#fff; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .section { margin-bottom:24px; }
+  .section h2 { font-size:16px; color:#60a5fa; margin-bottom:12px; text-transform:uppercase; letter-spacing:1px; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px; }
+  .card { background:#1e293b; border-radius:10px; padding:16px; border:1px solid #2d3748; transition:border-color 0.2s; }
+  .card:hover { border-color:#4f46e5; }
+  .card h3 { font-size:14px; font-weight:600; color:#fff; margin-bottom:6px; }
+  .card .desc { font-size:12px; color:#9ca3af; line-height:1.5; }
+  .card .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:500; margin-top:8px; }
+  .badge.api { background:#064e3b; color:#6ee7b7; }
+  .badge.cli { background:#1e1b4b; color:#a5b4fc; }
+  .badge.skill { background:#4c1d95; color:#c4b5fd; }
+  .badge.mcp { background:#7c2d12; color:#fca5a5; }
+  .badge.db { background:#3b0764; color:#e9d5ff; }
+  .flow { background:#1e293b; border-radius:10px; padding:20px; border:1px solid #2d3748; font-family:monospace; font-size:12px; line-height:2; color:#94a3b8; }
+  .flow .highlight { color:#60a5fa; font-weight:bold; }
+  .flow .arrow { color:#4ade80; }
+</style>
+</head>
+<body>
+
+<h1>BCI Innovation Labs — Agentic OS Data Map</h1>
+<p class="subtitle">Pantry → Prep → Plate | Updated 2026-05-10</p>
+
+<div class="tabs">
+  <button class="tab active" onclick="showTab('pantry')">Pantry (Sources)</button>
+  <button class="tab" onclick="showTab('prep')">Prep (Processing)</button>
+  <button class="tab" onclick="showTab('plate')">Plate (Outputs)</button>
+  <button class="tab" onclick="showTab('flow')">Data Flow</button>
+  <button class="tab" onclick="showTab('agents')">Agent Map</button>
+</div>
+
+<!-- PANTRY -->
+<div id="pantry" class="panel active">
+  <div class="section">
+    <h2>Core Data Sources</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>SmartSocial API</h3>
+        <div class="desc">27 connected accounts. Generate, schedule, publish, inbox, analytics across LinkedIn, Twitter, Instagram, Facebook, TikTok.</div>
+        <span class="badge api">API</span>
+      </div>
+      <div class="card">
+        <h3>Google Workspace (gws CLI)</h3>
+        <div class="desc">Gmail, Calendar, Drive. Authenticated as dr.m.weyers@bcinnovationlabs.com. BCI Drive folder for all shared docs.</div>
+        <span class="badge cli">CLI</span>
+      </div>
+      <div class="card">
+        <h3>ScholarFlow</h3>
+        <div class="desc">8 academic databases (arXiv, CORE, CrossRef, EuropePMC, OpenAlex, PubMed, Semantic Scholar, Perplexity Sonar). localhost:3201</div>
+        <span class="badge api">API</span>
+      </div>
+      <div class="card">
+        <h3>Obsidian Second Brain</h3>
+        <div class="desc">Shared vault: github.com/drmweyers/second-brain. Projects, resources, dev-updates, research, shared-skills. Synced every 4h.</div>
+        <span class="badge db">Vault</span>
+      </div>
+      <div class="card">
+        <h3>Stripe</h3>
+        <div class="desc">Payment processing for SmartSocial, EvoFit products. Revenue, subscriptions, churn data.</div>
+        <span class="badge api">API</span>
+      </div>
+      <div class="card">
+        <h3>ClaudeClaw SQLite DB</h3>
+        <div class="desc">Conversation history, memories, hive mind, mission tasks, scheduled tasks, token usage, agent file history.</div>
+        <span class="badge db">SQLite</span>
+      </div>
+      <div class="card">
+        <h3>GitHub Repos</h3>
+        <div class="desc">SmartSocial, EvoFitTrainer, claudeclaw-os, RAG WebApp, bci-command-centre, second-brain. Git log = dev activity.</div>
+        <span class="badge cli">CLI</span>
+      </div>
+      <div class="card">
+        <h3>Vercel / DigitalOcean</h3>
+        <div class="desc">Hosting for SmartSocial (Vercel), EvoFit (DO App Platform). Deployment status, logs.</div>
+        <span class="badge cli">CLI</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PREP -->
+<div id="prep" class="panel">
+  <div class="section">
+    <h2>Pre-Processing & Summary Tables</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Weekly Summary Tables</h3>
+        <div class="desc">Every Monday 6am: pre-aggregates SmartSocial analytics, agent activity, mission tasks, git commits → second-brain/summaries/</div>
+        <span class="badge skill">Cron</span>
+      </div>
+      <div class="card">
+        <h3>Memory Consolidation</h3>
+        <div class="desc">SQLite memories table. Decay/consolidation runs on main process. Cross-session knowledge retention.</div>
+        <span class="badge db">Auto</span>
+      </div>
+      <div class="card">
+        <h3>Vault Ingestion (6h cycle)</h3>
+        <div class="desc">ClaudeClawVaultSync task: 457 notes → 2,285 memory rows. Keeps agents aware of vault content without re-reading.</div>
+        <span class="badge skill">Cron</span>
+      </div>
+      <div class="card">
+        <h3>Content Pipeline Themes</h3>
+        <div class="desc">SS-THEMES skill: strategic content building blocks with source articles. Pre-researched angles ready for generation.</div>
+        <span class="badge skill">Skill</span>
+      </div>
+      <div class="card">
+        <h3>Post-Compaction Hook</h3>
+        <div class="desc">Re-injects critical identity/context after Claude compacts conversation. Prevents "repeating yourself" problem.</div>
+        <span class="badge skill">Hook</span>
+      </div>
+      <div class="card">
+        <h3>Session Start Hook</h3>
+        <div class="desc">Injects agent status, recent team activity, pending missions on every new session. Immediate situational awareness.</div>
+        <span class="badge skill">Hook</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PLATE -->
+<div id="plate" class="panel">
+  <div class="section">
+    <h2>Outputs & Automations</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Telegram Delivery</h3>
+        <div class="desc">4 bots (main, research, content, ops). File attachments, proactive updates, voice message handling.</div>
+        <span class="badge api">Telegram</span>
+      </div>
+      <div class="card">
+        <h3>Discord #research-briefings</h3>
+        <div class="desc">Hal monitors. Research output channel for daily AI briefings and competitive intel.</div>
+        <span class="badge api">Discord</span>
+      </div>
+      <div class="card">
+        <h3>Google Drive Docs</h3>
+        <div class="desc">All research deliverables → BCI Drive as Google Docs. Standing rule: never local-only.</div>
+        <span class="badge cli">gws</span>
+      </div>
+      <div class="card">
+        <h3>SmartSocial Publishing</h3>
+        <div class="desc">Content agent generates + schedules. Autonomy: drafts=auto, publish=ask Mark. All 27 accounts.</div>
+        <span class="badge api">API</span>
+      </div>
+      <div class="card">
+        <h3>Email (as Mark or Claw)</h3>
+        <div class="desc">gws CLI. Internal=autonomous, external=ask first. ClaudeClaw alias for bot-sourced messages.</div>
+        <span class="badge cli">gws</span>
+      </div>
+      <div class="card">
+        <h3>Second Brain Commits</h3>
+        <div class="desc">All agents push to shared vault. Research → research/, Content → projects/, Ops → ops-updates/.</div>
+        <span class="badge cli">Git</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DATA FLOW -->
+<div id="flow" class="panel">
+  <div class="flow">
+    <span class="highlight">INPUT LAYER</span><br>
+    SmartSocial API <span class="arrow">→</span> Content Agent <span class="arrow">→</span> Drafts <span class="arrow">→</span> Mark Approval <span class="arrow">→</span> Publish<br>
+    ScholarFlow <span class="arrow">→</span> Research Agent <span class="arrow">→</span> Briefs <span class="arrow">→</span> Google Drive + Telegram<br>
+    Gmail/Calendar <span class="arrow">→</span> Ops Agent <span class="arrow">→</span> Triage <span class="arrow">→</span> Telegram Summary<br>
+    Git Repos <span class="arrow">→</span> Weekly Summary <span class="arrow">→</span> second-brain/summaries/<br><br>
+
+    <span class="highlight">KNOWLEDGE LAYER</span><br>
+    Second Brain Vault <span class="arrow">→</span> VaultSync (6h) <span class="arrow">→</span> SQLite memories <span class="arrow">→</span> Agent context injection<br>
+    Hive Mind DB <span class="arrow">→</span> Session Start Hook <span class="arrow">→</span> "What happened while I was away"<br>
+    CLAUDE.md + Rules <span class="arrow">→</span> Every turn <span class="arrow">→</span> Identity + constraints<br><br>
+
+    <span class="highlight">AUTOMATION LAYER</span><br>
+    Cron: second-brain pull (every 4h) <span class="arrow">→</span> Keeps agents synced with Hal/Hermes<br>
+    Cron: weekly summary tables (Mon 6am) <span class="arrow">→</span> Silver platter for analysis<br>
+    Cron: vault ingestion (every 6h) <span class="arrow">→</span> Memory stays fresh<br>
+    Hook: session start <span class="arrow">→</span> Immediate situational awareness<br>
+    Hook: post-compact <span class="arrow">→</span> Prevents context amnesia<br>
+    Mission CLI <span class="arrow">→</span> Cross-agent delegation (picked up in 60s)<br>
+  </div>
+</div>
+
+<!-- AGENT MAP -->
+<div id="agents" class="panel">
+  <div class="section">
+    <h2>Agent Workforce</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Claw (Main Orchestrator)</h3>
+        <div class="desc">Chief of staff. Routes tasks, personal assistant, system admin. Knows all agents' scopes. Delegates via mission-cli.</div>
+        <span class="badge skill">@ClaudeClaw_bot</span>
+      </div>
+      <div class="card">
+        <h3>Research</h3>
+        <div class="desc">Deep research: academic literature (ScholarFlow), competitive intel, market analysis, trend reports. Writes to second-brain/research/.</div>
+        <span class="badge skill">@bci_research_agent_bot</span>
+      </div>
+      <div class="card">
+        <h3>Content</h3>
+        <div class="desc">ALL content + ALL SmartSocial. YouTube scripts, LinkedIn, blogs, lead magnets, email, social scheduling/publishing/inbox/analytics.</div>
+        <span class="badge skill">@bci_content_agent_bot</span>
+      </div>
+      <div class="card">
+        <h3>Ops</h3>
+        <div class="desc">Calendar, email inbox, billing (Stripe/Gumroad), system health. Does NOT own SmartSocial.</div>
+        <span class="badge skill">@bci_ops_agent_bot</span>
+      </div>
+      <div class="card">
+        <h3>Hal (OpenClaw)</h3>
+        <div class="desc">CTO/Engineering on desktop Docker. Owns bci-command-centre, SmartSocial codebase, shared-skills. Syncs via second-brain.</div>
+        <span class="badge mcp">Desktop</span>
+      </div>
+      <div class="card">
+        <h3>Hermes</h3>
+        <div class="desc">COO on desktop. Discord presence, system orchestration, bridge between agents. Syncs via second-brain.</div>
+        <span class="badge mcp">Desktop</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

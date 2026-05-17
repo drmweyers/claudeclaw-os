@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"C:/Users/drmwe/Claude/claudeclaw-os/.claude/hooks/session-start-inject.sh\"",
+            "timeout": 10000
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"C:/Users/drmwe/Claude/claudeclaw-os/.claude/hooks/post-compact-inject.sh\"",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
