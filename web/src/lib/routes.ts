@@ -1,7 +1,7 @@
 import {
   LayoutGrid, ListTodo, Users, MessageSquare,
   Brain, Network, Activity, ShieldCheck, BookOpen,
-  Swords,
+  Swords, GitBranch,
   Settings,
 } from 'lucide-preact';
 import type { ComponentChildren } from 'preact';
@@ -32,6 +32,7 @@ export const ROUTES: RouteDef[] = [
   { path: '/audit',      label: 'Audit',           section: 'intelligence', icon: ShieldCheck                   },
 
   { path: '/warroom',    label: 'War Room',        section: 'collaborate',  icon: Swords,        shortcut: 'g w' },
+  { path: '/bridge',     label: 'Bridge',          section: 'collaborate',  icon: GitBranch,     shortcut: 'g b' },
 
   { path: '/settings',   label: 'Settings',        section: 'configure',    icon: Settings                  },
 ];

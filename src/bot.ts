@@ -31,7 +31,7 @@ import {
   PROJECT_ROOT,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
-import { maybeEmitSpendMarker, emitSessionEnd } from './bridge.js';
+import { maybeEmitSpendMarker, emitSessionEnd, bridgeRecent } from './bridge.js';
 import { logger } from './logger.js';
 import { downloadMedia, buildPhotoMessage, buildDocumentMessage, buildVideoMessage } from './media.js';
 import { buildMemoryContext, evaluateMemoryRelevance, saveConversationTurn, shouldNudgeMemory, MEMORY_NUDGE_TEXT } from './memory.js';
@@ -894,6 +894,7 @@ export function createBot(): Bot {
     { command: 'delegate', description: 'Delegate task to agent' },
     { command: 'lock', description: 'Lock session (requires PIN to unlock)' },
     { command: 'status', description: 'Show security status' },
+    { command: 'bridge', description: 'Channel 4 bridge digest (Claw ↔ Hal)' },
   ];
   const skillCommands = discoverSkillCommands();
   const allCommands = [...builtInCommands, ...skillCommands].slice(0, 100); // Telegram limit: 100 commands
@@ -919,7 +920,12 @@ export function createBot(): Bot {
       '/agents — List available agents\n' +
       '/delegate — Delegate task to agent\n' +
       '/lock — Lock session (PIN required to unlock)\n' +
-      '/status — Security status\n\n' +
+      '/status — Security status\n' +
+      '/bridge [hal|hermes] [hours] — Channel 4 bridge digest\n\n' +
+      'Bridge tips:\n' +
+      '• /bridge — last 24h from both sides\n' +
+      '• /bridge hal 6 — just Hal, last 6 hours\n' +
+      "• Type ##private (or (off-record) / (don't share)) in any turn to keep it off the bridge\n\n" +
       'Delegation: @agentId: prompt or /delegate agentId prompt\n\n' +
       'You can also send voice notes, photos, files, and videos.'
     );
@@ -1282,6 +1288,53 @@ export function createBot(): Bot {
       const idleSec = Math.round((Date.now() - s.lastActivity) / 1000);
       lines.push(`Last activity: ${idleSec < 60 ? idleSec + 's ago' : Math.round(idleSec / 60) + 'm ago'}`);
     }
+    await ctx.reply(lines.join('\n'));
+  });
+
+  // /bridge — Channel 4 digest. Reads redacted events from second-brain/bridge-events/.
+  // Usage: /bridge [hal|hermes|all] [hours]   (defaults: all, 24)
+  bot.command('bridge', async (ctx) => {
+    if (await replyIfLocked(ctx)) return;
+    const args = (ctx.match || '').trim().split(/\s+/).filter(Boolean);
+    let source: 'hal' | 'hermes' | 'all' = 'all';
+    let hours = 24;
+    for (const a of args) {
+      if (a === 'hal' || a === 'hermes' || a === 'all') source = a;
+      else if (/^\d+$/.test(a)) hours = Math.min(168, parseInt(a, 10));
+    }
+    const sources: Array<'hermes' | 'hal'> = source === 'all' ? ['hermes', 'hal'] : [source];
+    const events = (await Promise.all(sources.map((s) => bridgeRecent(s, hours)))).flat();
+    events.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+
+    if (events.length === 0) {
+      await ctx.reply(
+        `No bridge events from ${source} in the last ${hours}h.\n\n` +
+        `Tip: /newchat closes a session and writes a session_summary.\n` +
+        `Type ##private in any turn to keep it off the bridge.`,
+      );
+      return;
+    }
+
+    const lines = [`Bridge digest — ${source}, last ${hours}h (${events.length} events)`, ''];
+    for (const e of events.slice(0, 15)) {
+      const time = new Date(e.ts).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const p = e.payload as Record<string, unknown>;
+      let detail = '';
+      if (e.event_type === 'private_aside') {
+        detail = '[off-record]';
+      } else if (e.event_type === 'spend_marker') {
+        const cents = (p.cost_cents as number) ?? 0;
+        const bucket = (p.bucket as string) ?? '';
+        detail = `$${(cents / 100).toFixed(2)} ${bucket}`;
+      } else if (typeof p.summary === 'string') {
+        detail = (p.summary as string).slice(0, 180);
+      } else {
+        detail = '';
+      }
+      lines.push(`${time} · ${e.source}/${e.event_type}  ${detail}`);
+    }
+    if (events.length > 15) lines.push('', `… and ${events.length - 15} more.`);
+    lines.push('', 'Filter: /bridge hal 6 · /bridge hermes 24 · /bridge all 72');
     await ctx.reply(lines.join('\n'));
   });
 

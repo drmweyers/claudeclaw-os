@@ -309,6 +309,37 @@ ${WARROOM_ENABLED ? `<div class="card" style="border:1px solid #1e3a5f">
   </div>
 </div>
 
+<!-- Channel 4 Bridge (Hermes ↔ Hal ambient awareness) -->
+<div id="bridge-section" class="mb-5">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Bridge <span style="color:#6b7280;font-weight:400;text-transform:none;letter-spacing:0">— ClaudeClaw ↔ Hal ambient awareness</span></h2>
+    <div class="flex items-center gap-2">
+      <select id="bridge-source" onchange="loadBridge()" style="background:#1a1a1a;color:#d4d4d8;border:1px solid #2a2a2a;border-radius:6px;padding:2px 6px;font-size:11px">
+        <option value="all">Both</option>
+        <option value="hermes">From ClaudeClaw</option>
+        <option value="hal">From Hal</option>
+      </select>
+      <select id="bridge-hours" onchange="loadBridge()" style="background:#1a1a1a;color:#d4d4d8;border:1px solid #2a2a2a;border-radius:6px;padding:2px 6px;font-size:11px">
+        <option value="6">6h</option>
+        <option value="24" selected>24h</option>
+        <option value="72">3d</option>
+      </select>
+    </div>
+  </div>
+  <!-- Persistent How-To strip: always visible so you don't have to remember -->
+  <div class="card" style="background:#0f1729;border:1px solid #1e3a5f;padding:10px 14px;margin-bottom:8px">
+    <div style="font-size:11px;color:#93c5fd;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:4px">How to use the bridge</div>
+    <div style="font-size:12px;color:#d4d4d8;line-height:1.55">
+      <span style="color:#60a5fa">Ask in Telegram:</span> <code style="background:#1a1a1a;padding:1px 6px;border-radius:4px;color:#e0e0e0">/bridge hal 24</code> &nbsp;or&nbsp; <code style="background:#1a1a1a;padding:1px 6px;border-radius:4px;color:#e0e0e0">/bridge</code> for everything.<br>
+      <span style="color:#60a5fa">Or just ask Claw:</span> "what did Hal do overnight?" — the agent runs the CLI itself.<br>
+      <span style="color:#60a5fa">Keep a turn off-record:</span> type <code style="background:#1a1a1a;padding:1px 6px;border-radius:4px;color:#fbbf24">##private</code> (or <code style="background:#1a1a1a;padding:1px 6px;border-radius:4px;color:#fbbf24">(off-record)</code> / <code style="background:#1a1a1a;padding:1px 6px;border-radius:4px;color:#fbbf24">(don't share)</code>) anywhere in the message. The turn collapses to <em>private_aside</em>; Hal sees a gap, not the content.
+    </div>
+  </div>
+  <div id="bridge-container" class="card hive-scroll">
+    <div class="text-gray-500 text-sm">Loading...</div>
+  </div>
+</div>
+
 <!-- Tasks Inbox -->
 <div id="tasks-inbox-section" class="mb-5" style="display:none">
   <div class="flex items-center justify-between mb-2">
@@ -2003,6 +2034,48 @@ function copyToClipboard(text) {
   }).catch(function() {});
 }
 
+async function loadBridge() {
+  try {
+    const source = (document.getElementById('bridge-source') || {}).value || 'all';
+    const hours = (document.getElementById('bridge-hours') || {}).value || '24';
+    const data = await api('/api/bridge/recent?source=' + source + '&hours=' + hours);
+    const container = document.getElementById('bridge-container');
+    if (!container) return;
+    if (!data.events || data.events.length === 0) {
+      container.innerHTML = '<div style="font-size:12px;color:#6b7280;padding:8px 4px;line-height:1.6">No bridge events in the selected window.<br>Open a Telegram chat and use <code style="background:#1a1a1a;padding:1px 5px;border-radius:4px;color:#a78bfa">/newchat</code> to close a session — that will emit the first <em>session_summary</em>.</div>';
+      return;
+    }
+    const rows = data.events.slice(0, 30).map(function(e, i) {
+      const time = new Date(e.ts).toLocaleString([], {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const sourceColor = e.source === 'hermes' ? '#a78bfa' : '#6ee7b7';
+      const typeColor = e.event_type === 'private_aside' ? '#fbbf24' : e.event_type === 'spend_marker' ? '#f87171' : '#9ca3af';
+      const payload = e.payload || {};
+      let detail = '';
+      if (e.event_type === 'private_aside') {
+        detail = '<em style="color:#fbbf24">[redacted — off-record turn]</em>';
+      } else if (e.event_type === 'spend_marker') {
+        const cents = payload.cost_cents || 0;
+        const bucket = payload.bucket || '?';
+        detail = '$' + (cents / 100).toFixed(2) + ' · ' + bucket + (payload.model ? ' · ' + payload.model : '');
+      } else if (typeof payload.summary === 'string') {
+        detail = escapeHtml(payload.summary).slice(0, 280);
+      } else {
+        detail = '<span style="color:#6b7280">' + e.event_type + '</span>';
+      }
+      return '<tr>' +
+        '<td class="col-time">' + time + '</td>' +
+        '<td class="col-agent" style="color:' + sourceColor + '">' + e.source + '</td>' +
+        '<td class="col-action" style="color:' + typeColor + '">' + e.event_type + '</td>' +
+        '<td><div class="col-summary">' + detail + '</div></td>' +
+      '</tr>';
+    }).join('');
+    container.innerHTML = '<table class="hive-table"><thead><tr><th class="col-time">Time</th><th class="col-agent">Source</th><th class="col-action">Type</th><th>Detail</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  } catch (err) {
+    const container = document.getElementById('bridge-container');
+    if (container) container.innerHTML = '<div class="text-gray-500 text-sm">Bridge unavailable: ' + escapeHtml(String(err)) + '</div>';
+  }
+}
+
 async function loadHiveMind() {
   try {
     const data = await api('/api/hive-mind?limit=15');
@@ -2446,7 +2519,7 @@ setInterval(loadMissionControl, 15000);
 async function refreshAll() {
   const btn = document.getElementById('refresh-btn').querySelector('svg');
   btn.classList.add('refresh-spin');
-  await Promise.all([loadInfo(), loadTasks(), loadMemories(), loadHealth(), loadTokens(), loadAgents(), loadHiveMind(), loadSummary(), loadMissionControl()]);
+  await Promise.all([loadInfo(), loadTasks(), loadMemories(), loadHealth(), loadTokens(), loadAgents(), loadHiveMind(), loadBridge(), loadSummary(), loadMissionControl()]);
   btn.classList.remove('refresh-spin');
   document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
 }

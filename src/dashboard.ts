@@ -2983,6 +2983,20 @@ export function buildDashboardApp(botApi?: Api<RawApi>): Hono {
     return c.json({ entries });
   });
 
+  // Channel 4 bridge — recent redacted events from either source.
+  app.get('/api/bridge/recent', async (c) => {
+    const sourceParam = c.req.query('source') || 'all';
+    const hours = parseInt(c.req.query('hours') || '24', 10);
+    const { bridgeRecent } = await import('./bridge.js');
+    const sources: Array<'hermes' | 'hal'> =
+      sourceParam === 'hermes' ? ['hermes'] :
+      sourceParam === 'hal' ? ['hal'] :
+      ['hermes', 'hal'];
+    const events = (await Promise.all(sources.map((s) => bridgeRecent(s, hours)))).flat();
+    events.sort((a, b) => (a.ts < b.ts ? 1 : -1)); // newest first for UI
+    return c.json({ sources, hours, count: events.length, events });
+  });
+
   // ── Chat endpoints ─────────────────────────────────────────────────
 
   // SSE stream for real-time chat updates
