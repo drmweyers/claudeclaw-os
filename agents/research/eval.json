@@ -1,0 +1,26 @@
+{
+  "sop_1_deep_research_brief": {
+    "criteria": [
+      {"name": "source_quality", "weight": 0.3, "description": "Majority high-confidence sources (peer-reviewed, primary, regulatory)"},
+      {"name": "conclusion_first", "weight": 0.2, "description": "Brief leads with actionable conclusion, not background"},
+      {"name": "google_doc_delivered", "weight": 0.2, "description": "Uploaded to BCI Drive as Google Doc and link sent to Mark"},
+      {"name": "scope_accuracy", "weight": 0.3, "description": "Answered the actual question asked, not adjacent topics"}
+    ]
+  },
+  "sop_2_competitive_analysis": {
+    "criteria": [
+      {"name": "competitor_coverage", "weight": 0.3, "description": "All relevant competitors identified (not just top 3)"},
+      {"name": "data_freshness", "weight": 0.2, "description": "Pricing and feature data observed with dates noted"},
+      {"name": "comparison_clarity", "weight": 0.25, "description": "Comparison table is scannable and actionable"},
+      {"name": "recommendation_quality", "weight": 0.25, "description": "Recommendations are specific and tied to BCI's position"}
+    ]
+  },
+  "sop_3_peptides_literature": {
+    "criteria": [
+      {"name": "scholarflow_used", "weight": 0.2, "description": "ScholarFlow queried for peer-reviewed sources (not just web search)"},
+      {"name": "regulatory_context", "weight": 0.25, "description": "Health Canada/FDA regulatory status included where relevant"},
+      {"name": "evidence_grading", "weight": 0.3, "description": "Each claim tagged with confidence level (high/medium/low)"},
+      {"name": "no_health_claims", "weight": 0.25, "description": "Information presented as research, never as medical recommendations"}
+    ]
+  }
+}

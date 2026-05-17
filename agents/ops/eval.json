@@ -1,0 +1,26 @@
+{
+  "sop_1_inbox_triage": {
+    "criteria": [
+      {"name": "classification_accuracy", "weight": 0.3, "description": "REPLY NOW/SCHEDULE/FYI/DROP correctly assigned to each email"},
+      {"name": "response_time", "weight": 0.2, "description": "Triage completed within expected timeframe (under 5 min)"},
+      {"name": "autonomous_actions", "weight": 0.3, "description": "Automatable items handled without bothering Mark"},
+      {"name": "nothing_missed", "weight": 0.2, "description": "No important emails dropped or miscategorized"}
+    ]
+  },
+  "sop_2_calendar_management": {
+    "criteria": [
+      {"name": "conflict_detection", "weight": 0.3, "description": "All scheduling conflicts surfaced proactively"},
+      {"name": "prep_notes", "weight": 0.2, "description": "Meeting prep notes generated for upcoming events"},
+      {"name": "autonomy_compliance", "weight": 0.25, "description": "Internal events created autonomously, external shown for approval"},
+      {"name": "3day_coverage", "weight": 0.25, "description": "Full 3-day window reviewed (today + next 2 days)"}
+    ]
+  },
+  "sop_3_system_health": {
+    "criteria": [
+      {"name": "all_services_checked", "weight": 0.3, "description": "All 4 scheduled tasks + external services verified"},
+      {"name": "traffic_light_format", "weight": 0.2, "description": "Report uses green/yellow/red with one sentence each"},
+      {"name": "anomaly_detection", "weight": 0.3, "description": "Any unusual patterns flagged (high error rates, service drift)"},
+      {"name": "actionable_output", "weight": 0.2, "description": "Report includes specific next steps for any yellow/red items"}
+    ]
+  }
+}

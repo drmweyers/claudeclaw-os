@@ -1,0 +1,26 @@
+{
+  "sop_1_generate_schedule": {
+    "criteria": [
+      {"name": "brand_voice_match", "weight": 0.3, "description": "Output matches Mark's voice rules and the correct brand surface"},
+      {"name": "variant_quality", "weight": 0.25, "description": "3+ meaningfully different variants generated (not just rewording)"},
+      {"name": "platform_optimization", "weight": 0.25, "description": "Content tailored to platform norms (LinkedIn length, Twitter concision, etc.)"},
+      {"name": "approval_first_pass", "weight": 0.2, "description": "Mark approved without requesting major edits"}
+    ]
+  },
+  "sop_2_linkedin_post": {
+    "criteria": [
+      {"name": "hook_strength", "weight": 0.3, "description": "First 2 lines would stop a scroller (contrarian, surprising, or specific)"},
+      {"name": "voice_compliance", "weight": 0.25, "description": "No forbidden phrases, no em dashes, evidence-based framing"},
+      {"name": "engagement_design", "weight": 0.25, "description": "CTA invites genuine comments, not empty engagement bait"},
+      {"name": "viral_benchmark", "weight": 0.2, "description": "Matches patterns from top 50 decoded posts in the skill"}
+    ]
+  },
+  "sop_3_pipeline_run": {
+    "criteria": [
+      {"name": "theme_relevance", "weight": 0.25, "description": "Selected themes align with current BCI priorities"},
+      {"name": "volume_delivered", "weight": 0.25, "description": "Target piece count met (e.g. 5+ pieces per pipeline run)"},
+      {"name": "approval_rate", "weight": 0.3, "description": "Percentage of generated pieces Mark approved without major edits"},
+      {"name": "pipeline_completion", "weight": 0.2, "description": "All 5 pipeline steps executed without manual intervention"}
+    ]
+  }
+}
